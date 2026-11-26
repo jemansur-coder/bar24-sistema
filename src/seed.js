@@ -18,14 +18,15 @@ export const DESCRICOES = {
 };
 
 export const TIPOS_JOGO = [
-  { id: 'ficha', nome: 'Ficha sinuca', preco: 2, mesa: 'sinuca' },
+  { id: 'ficha', nome: 'Ficha sinuca', preco: 2, mesa: 'sinuca', porFicha: true },
   { id: 'ronda', nome: 'Ronda', preco: 50, mesa: 'cartas' },
   { id: 'pife', nome: 'Pife', preco: 25, mesa: 'cartas' },
 ];
 
 export const MESAS_SALAO = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ id: 'm' + n, nome: 'Mesa ' + n })).concat([{ id: 'balcao', nome: 'Balcão' }]);
 
-export const PAPEIS = ['Dono', 'Gerente', 'Caixa', 'Garçom', 'Cozinha', 'Estoquista'];
+// ordem da tela de PIN: Dono, Gerente, Garçom, Cozinha (depois os demais papéis)
+export const PAPEIS = ['Dono', 'Gerente', 'Garçom', 'Cozinha', 'Caixa', 'Estoquista'];
 
 // ---------- controle de estoque ----------
 export const MOTIVOS_SAIDA = [['perda', 'Perda / estragou'], ['quebra', 'Quebra'], ['vencido', 'Venceu'], ['consumo', 'Consumo da equipe'], ['cortesia', 'Cortesia']];
@@ -155,7 +156,8 @@ export function seed() {
 
   const comandas = [
     { id: 'cm-940', numero: g('940'), mesaId: 'm1', clienteId: 'c-goiote', garcom: 'Rafael', abertaEm: now - 182 * MIN, pessoas: 4, servico: true, status: 'aberta', contaPedida: false,
-      itens: [it('prato-dia', 4, 'entregue', 150, 'completo'), it('heineken', 6, 'entregue', 120), it('x-tudo', 2, 'preparo', 9, '1 sem cebola')] },
+      itens: [it('prato-dia', 4, 'entregue', 150, 'completo'), it('heineken', 6, 'entregue', 120), it('x-tudo', 2, 'preparo', 9, '1 sem cebola'),
+        { id: 'it-ficha-s1', produtoId: null, nome: 'Ficha sinuca · Sinuca 1', preco: 2, qtd: 5, obs: '', destino: 'jogo', status: 'entregue', envio: null, enviadoEm: now - 7 * MIN, fichaMesaId: 'sinuca-1', por: 'Joana' }] },
     { id: 'cm-959', numero: g('959'), mesaId: 'm5', clienteId: null, garcom: 'Rafael', abertaEm: now - 72 * MIN, pessoas: 3, servico: true, status: 'aberta', contaPedida: true,
       itens: [it('brahma', 4, 'entregue', 60), it('x-picanha', 2, 'preparo', 22, '1 sem cebola')] },
     { id: 'cm-962', numero: g('962'), mesaId: 'm2', clienteId: null, garcom: 'Bia', abertaEm: now - 40 * MIN, pessoas: 2, servico: true, status: 'aberta', contaPedida: false,
@@ -165,8 +167,12 @@ export function seed() {
   ];
 
   const mesas = [
-    { id: 'sinuca-1', nome: 'Sinuca 1', tipo: 'sinuca', sessao: { jogo: 'ficha', jogadores: 2, minutos: 30, inicio: now - 11 * MIN, fim: now + 19 * MIN, valor: 4, comandaId: 'cm-940', visto: false } },
-    { id: 'sinuca-2', nome: 'Sinuca 2', tipo: 'sinuca', sessao: { jogo: 'ficha', jogadores: 2, minutos: 30, inicio: now - 30 * MIN - 20000, fim: now - 20000, valor: 4, comandaId: null, visto: false } },
+    // Sinuca 1: 5 fichas compradas na comanda 940, jogando a 3ª (saldo 2). Sinuca 2: 1 ficha paga em dinheiro, última ficha.
+    { id: 'sinuca-1', nome: 'Sinuca 1', tipo: 'sinuca', sessao: { jogo: 'ficha', fichas: 5, usadas: 3, estornadas: 0, jogadores: 2, minutos: 0, inicio: now - 34 * MIN, partidaEm: now - 6 * MIN, fichaEm: now - 6 * MIN, fim: null, valor: 10, comandaId: 'cm-940', visto: false,
+      partidas: [now - 34 * MIN, now - 21 * MIN, now - 6 * MIN],
+      lanc: [{ id: 'lf-s1a', ts: now - 34 * MIN, qtd: 3, valor: 6, cobranca: 'comanda', comandaNum: '940', por: 'Joana' }, { id: 'lf-s1b', ts: now - 7 * MIN, qtd: 2, valor: 4, cobranca: 'comanda', comandaNum: '940', por: 'Rafael' }] } },
+    { id: 'sinuca-2', nome: 'Sinuca 2', tipo: 'sinuca', sessao: { jogo: 'ficha', fichas: 1, usadas: 1, estornadas: 0, jogadores: 2, minutos: 0, inicio: now - 9 * MIN, partidaEm: now - 9 * MIN, fichaEm: now - 9 * MIN, fim: null, valor: 2, comandaId: null, visto: false,
+      partidas: [now - 9 * MIN], lanc: [{ id: 'lf-s2a', ts: now - 9 * MIN, qtd: 1, valor: 2, cobranca: 'dinheiro', comandaNum: null, por: 'Joana' }] } },
     { id: 'sinuca-3', nome: 'Sinuca 3', tipo: 'sinuca', sessao: null },
     { id: 'cartas-1', nome: 'Cartas 1', tipo: 'cartas', sessao: { jogo: 'pife', jogadores: 4, minutos: 60, inicio: now - 57 * MIN, fim: now + 3 * MIN, valor: 100, comandaId: null, visto: false } },
     { id: 'cartas-2', nome: 'Cartas 2', tipo: 'cartas', sessao: { jogo: 'ronda', jogadores: 3, minutos: 60, inicio: now - 19 * MIN, fim: now + 41 * MIN, valor: 150, comandaId: null, visto: false } },
@@ -183,7 +189,19 @@ export function seed() {
   }
   pagamentos.push({ id: 'pg-j1', ts: now - 120 * MIN, metodo: 'pix', valor: 100, origem: 'Jogo Pife · Cartas 1', tipo: 'jogo' });
   pagamentos.push({ id: 'pg-j2', ts: now - 19 * MIN, metodo: 'dinheiro', valor: 150, origem: 'Jogo Ronda · Cartas 2', tipo: 'jogo' });
-  pagamentos.push({ id: 'pg-j3', ts: now - 30 * MIN, metodo: 'dinheiro', valor: 4, origem: 'Jogo Ficha sinuca · Sinuca 2', tipo: 'jogo' });
+  pagamentos.push({ id: 'pg-j3', ts: now - 9 * MIN, metodo: 'dinheiro', valor: 2, origem: 'Ficha sinuca · Sinuca 2', tipo: 'jogo', mesaJogoId: 'sinuca-2', fichas: 1, por: 'Joana' });
+  // sessões de sinuca já encerradas hoje (histórico por mesa)
+  const sessaoAntiga = (id, mesaId, mesaNome, iniMin, partidasMin, fimMin, cobranca, por) => {
+    const n = partidasMin.length; const ts = now - iniMin * MIN;
+    if (cobranca !== 'comanda') pagamentos.push({ id: 'pg-' + id, ts, metodo: cobranca, valor: n * 2, origem: 'Ficha sinuca · ' + mesaNome, tipo: 'jogo', mesaJogoId: mesaId, fichas: n, por });
+    return { id, mesaId, mesaNome, jogo: 'ficha', inicio: ts, fim: now - fimMin * MIN, fichas: n, usadas: n, estornadas: 0, valor: n * 2, comandaId: null, comandaNum: null, sobraCobrada: 0, encerradoPor: por,
+      partidas: partidasMin.map((m) => now - m * MIN), lanc: [{ id: 'lf-' + id, ts, qtd: n, valor: n * 2, cobranca, comandaNum: null, por }] };
+  };
+  const historicoSinuca = [
+    sessaoAntiga('hs-1', 'sinuca-3', 'Sinuca 3', 200, [200, 186, 171, 158], 140, 'pix', 'Joana'),
+    sessaoAntiga('hs-2', 'sinuca-1', 'Sinuca 1', 150, [150, 137, 122], 105, 'dinheiro', 'Joana'),
+    sessaoAntiga('hs-3', 'sinuca-3', 'Sinuca 3', 95, [95, 80], 60, 'cartao', 'Rafael'),
+  ];
 
   // turno anterior já fechado (com R$ 5 faltando, para mostrar a diferença)
   const tA = now - 16 * 60 * MIN, tF = now - 4 * 60 * MIN - 2 * MIN;
@@ -205,6 +223,9 @@ export function seed() {
     log: [],
     caixa: { aberto: true, abertoEm: now - 4 * 60 * MIN, operador: 'Joana', fundo: 200, movs: [{ tipo: 'sangria', valor: 300, motivo: 'Depósito no cofre', ts: now - 90 * MIN, por: 'Joana' }] },
     turnos: [turnoAnterior],
-    config: { servico: 10, avisoMin: 5, nomeBar: 'Bar 24 Horas', limiteDivergencia: 20 },
+    historicoSinuca,
+    // última conferência do cofre de cada mesa (madrugada); a partir daqui o sistema conta as partidas
+    conferenciasFichas: ['sinuca-1', 'sinuca-2', 'sinuca-3'].map((id, k) => ({ id: 'cf-' + id, ts: now - 240 * MIN, mesaId: id, mesaNome: 'Sinuca ' + (k + 1), desde: null, esperado: 0, contado: 0, dif: 0, valor: 0, por: 'Ingrid', obs: 'Cofre esvaziado na troca de turno' })),
+    config: { servico: 10, avisoMin: 5, nomeBar: 'Bar 24 Horas', limiteDivergencia: 20, precoFicha: 2 },
   };
 }

@@ -3,9 +3,9 @@ import { Logo, TemaBtn, bip } from './ui.jsx';
 import { createRoot } from 'react-dom/client';
 import { ir, useRota } from './router.jsx';
 import './styles.css';
-import { A, avisosAbertos, prontosParaLevar, StoreProvider, desde, estadoMesa, nomeCliente, ticketsBar, useNow, useStore } from './store.jsx';
+import { A, avisosAbertos, contasParaLevar, eventosCozinha, prontosParaLevar, StoreProvider, desde, estadoMesa, nomeCliente, ticketsBar, useNow, useStore } from './store.jsx';
 import Dashboard from './pages/Dashboard.jsx';
-import Caixa from './pages/Caixa.jsx';
+import Caixa, { abrirConta } from './pages/Caixa.jsx';
 import Jogos from './pages/Jogos.jsx';
 import { Parede, ParedeTodas } from './pages/Parede.jsx';
 import Cozinha from './pages/Cozinha.jsx';
@@ -41,15 +41,20 @@ function Alertas() {
   // chamados da cozinha: toast fora do dashboard e da própria cozinha
   const avisos = doBar ? avisosAbertos(s).filter((a) => a.status === 'aberto') : [];
   const avisosToast = rotaAtual === '' || rotaAtual === 'cozinha' ? [] : avisos;
+  // caixa/bar acompanha a cozinha: pedido novo e "em preparo" aparecem por alguns segundos
+  const cozinhaEv = doBar ? eventosCozinha(s, now) : [];
+  // garçom: conta emitida pelo caixa para levar à mesa
+  const contas = ehGarcom ? contasParaLevar(s, usuario.nome) : [];
+  const nomeMesa = (c) => (c.mesaId ? s.mesasSalao.find((m) => m.id === c.mesaId)?.nome : 'Balcão');
   const conhecidos = useRef(null);
   useEffect(() => {
-    const chaves = new Set([...esgotadas.map((m) => 'm' + m.id), ...prontos.map((p) => 'p' + p.envio + p.origem), ...chamados.map((c) => 'c' + c.id), ...bar.map((b) => 'b' + b.envio), ...avisos.map((a) => 'a' + a.id)]);
+    const chaves = new Set([...esgotadas.map((m) => 'm' + m.id), ...prontos.map((p) => 'p' + p.envio + p.origem), ...chamados.map((c) => 'c' + c.id), ...bar.map((b) => 'b' + b.envio), ...avisos.map((a) => 'a' + a.id), ...cozinhaEv.map((k) => 'k' + k.chave), ...contas.map((c) => 'n' + c.id)]);
     if (conhecidos.current) {
       const novos = [...chaves].filter((k) => !conhecidos.current.has(k));
       if (novos.some((k) => k[0] === 'm')) bip(660, 0.3, 4);
       else if (novos.some((k) => k[0] === 'a') && rotaAtual !== 'cozinha') bip(784, 0.18, 3);
       else if (novos.length) bip(1046, 0.12, 2);
-      if (ehGarcom && novos.some((k) => k[0] === 'p')) { try { navigator.vibrate?.([200, 100, 200]); } catch (e) { /* sem vibração */ } }
+      if (ehGarcom && novos.some((k) => k[0] === 'p' || k[0] === 'n')) { try { navigator.vibrate?.([200, 100, 200]); } catch (e) { /* sem vibração */ } }
     }
     conhecidos.current = chaves;
   });
@@ -77,8 +82,29 @@ function Alertas() {
           </div>
         </div>
       ))}
-      {rotaAtual !== 'cozinha' && (prontos.length > 0 || chamados.length > 0 || bar.length > 0 || avisosToast.length > 0) && (
+      {rotaAtual !== 'cozinha' && (prontos.length > 0 || chamados.length > 0 || bar.length > 0 || avisosToast.length > 0 || cozinhaEv.length > 0 || contas.length > 0) && (
         <div className="toasts">
+          {contas.map((c) => (
+            <div className="toast" role="alert" key={'n' + c.id} style={{ borderColor: 'var(--warn)', background: 'var(--accent-soft)' }}>
+              <div className="col grow" style={{ gap: 4 }}>
+                <span className="t" style={{ color: 'var(--warn)' }}>CAIXA · CONTA PRONTA · BUSCAR NO CAIXA</span>
+                <b className="display" style={{ fontSize: 18 }}>{nomeMesa(c)} · Comanda {c.numero} — levar a conta</b>
+                <span className="small muted">Emitida por {c.contaEmitidaPor || 'caixa'} · há {desde(c.contaEmitidaEm, now)}</span>
+                <div className="row" style={{ marginTop: 6 }}>
+                  <button type="button" className="btn primary sm" onClick={() => act((d) => A.contaEntregue(d, c.id))}>Conta entregue na mesa</button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {cozinhaEv.map((k) => (
+            <div className="toast" role="status" key={'k' + k.chave} style={{ borderColor: k.tipo === 'preparo' ? 'var(--ok)' : 'var(--accent)', background: k.tipo === 'preparo' ? 'var(--ok-soft)' : 'var(--accent-soft)' }}>
+              <div className="col grow" style={{ gap: 4 }}>
+                <span className={'t ' + (k.tipo === 'preparo' ? 'ok' : 'accent')}>{k.tipo === 'preparo' ? 'COZINHA · EM PREPARO' : 'COZINHA · NOVO PEDIDO' + (k.tablet ? ' PELO TABLET' : '')}</span>
+                <b className="display" style={{ fontSize: 18 }}>{nomeMesa(k.c)} · {k.itens.map((i) => i.qtd + '× ' + i.nome).join(', ')}</b>
+                <span className="small muted">Comanda {k.c.numero} · garçom {k.c.garcom}{k.tipo === 'preparo' ? ' · a cozinha começou a preparar' : ' · já está na tela da cozinha'}</span>
+              </div>
+            </div>
+          ))}
           {avisosToast.slice(0, 3).map((a) => (
             <div className="toast" role="alert" key={a.id} style={{ borderColor: 'var(--bad)', background: 'var(--bad-soft)' }}>
               <div className="col grow" style={{ gap: 4 }}>
@@ -95,7 +121,7 @@ function Alertas() {
           {bar.slice(0, 3).map(({ c, envio, itens, ts }) => (
             <div className="toast bar" role="status" key={envio}>
               <div className="col grow" style={{ gap: 4 }}>
-                <span className="t" style={{ color: 'var(--info-text)' }}>BAR · NOVO PEDIDO · há {desde(ts, now)}</span>
+                <span className="t" style={{ color: 'var(--info-text)' }}>BAR · NOVO PEDIDO{itens.some((i) => i.via === 'tablet') ? ' PELO TABLET' : ''} · há {desde(ts, now)}</span>
                 <b className="display" style={{ fontSize: 18 }}>{itens.map((i) => i.qtd + '× ' + i.nome).join(', ')}</b>
                 <span className="small muted">{c.mesaId ? (s.mesasSalao.find((m) => m.id === c.mesaId)?.nome + ' · ') : ''}Comanda {c.numero} · garçom {c.garcom}{itens.some((i) => i.obs) ? ' · ' + itens.filter((i) => i.obs).map((i) => i.obs).join(', ') : ''}</span>
                 <div className="row" style={{ marginTop: 6 }}>
@@ -116,6 +142,7 @@ function Alertas() {
                   <span className="small muted">{cmd ? 'Comanda ' + cmd.numero + ' · garçom ' + cmd.garcom : 'Sem comanda aberta (abre uma nova ao lançar)'}</span>
                   <div className="row wrap" style={{ marginTop: 6, gap: 6 }}>
                     {ch.motivo === 'pedido' && <button type="button" className="btn primary sm" onClick={() => act((d) => A.atenderChamado(d, ch.id, { lancar: true }))}>Confirmar e enviar</button>}
+                    {ch.motivo === 'conta' && cmd && doBar && <button type="button" className="btn primary sm" onClick={() => { act((d) => A.emitirConta(d, cmd.id)); abrirConta(cmd.id); }}>Emitir conta</button>}
                     <button type="button" className="btn sm" onClick={() => act((d) => A.atenderChamado(d, ch.id))}>{ch.motivo === 'pedido' ? 'Recusar' : 'Atendido'}</button>
                   </div>
                 </div>

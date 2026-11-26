@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 
 // Roteador mínimo baseado no "#nome" da URL (ex.: #caixa, #parede-sinuca-1).
 // Funciona em qualquer hospedagem estática (Vercel, prévia) sem configuração de servidor.
-const ler = () => decodeURIComponent((window.location.hash || '').replace(/^#\/?/, ''));
+// parâmetros depois de "?" no hash (ex.: #mesa-m5?quiosque=1) não fazem parte da rota
+const ler = () => decodeURIComponent((window.location.hash || '').replace(/^#\/?/, '').split('?')[0]);
 
 export function useRota() {
   const [rota, setRota] = useState(ler);

@@ -34,6 +34,7 @@ export default function QrCodes() {
               <QR texto={linkPublico('mesa-' + m.id)} tamanho={160} titulo={'QR Code da ' + m.nome} />
               <span className="small muted">{c ? 'Comanda ' + c.numero + ' aberta' : 'Sem conta aberta'}</span>
               <a className="btn sm" href={'#mesa-' + m.id}>Ver como cliente</a>
+              <span className="small muted" style={{ wordBreak: 'break-all' }}>Tablet fixo (quiosque): {linkPublico('mesa-' + m.id)}?quiosque=1</span>
             </div>
           );
         })}

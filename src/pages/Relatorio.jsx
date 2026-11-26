@@ -2,6 +2,7 @@ import { brl, hora, useStore } from '../store.jsx';
 import { resumoDia } from '../stats.js';
 import { Logo } from '../ui.jsx';
 import { rankingDivergencias } from './Estoque.jsx';
+import { resumoSinuca } from '../sinuca.js';
 
 export default function Relatorio() {
   const { s } = useStore();
@@ -17,13 +18,18 @@ export default function Relatorio() {
   const faltaContagem = s.contagens.filter((c) => c.ts >= ini).reduce((a, c) => a + c.itens.filter((x) => x.dif < 0).reduce((b, x) => b - x.valor, 0), 0);
   const saidas = s.movsEstoque.filter((m) => m.ts >= ini && ['perda', 'quebra', 'vencido', 'consumo', 'cortesia'].includes(m.tipo));
   const valorSaidas = saidas.reduce((a, m) => a - m.qtd * (s.insumos.find((i) => i.id === m.insumoId)?.custo || 0), 0);
+  const sin = resumoSinuca(s, ini, now);
+  const alertFichas = s.alertasEstoque.filter((a) => a.ts >= ini && a.tipo === 'fichas');
   const cancelDepois = s.alertasEstoque.filter((a) => a.ts >= ini && a.tipo === 'cancelamento');
   const texto = [
     `*${s.config.nomeBar} — relatório de ${data}*`,
     `Vendas: ${brl(r.total)} (${r.nVendas} pagamentos)`,
     `Pix ${brl(r.porMetodo.pix)} · Cartão ${brl(r.porMetodo.cartao)} · Dinheiro ${brl(r.porMetodo.dinheiro)} · Fiado ${brl(r.porMetodo.fiado)}`,
     `Fiado em aberto: ${brl(r.fiadoTotal)} (${r.devedores.length} clientes, ${r.fiadoAtrasado.length} há +30 dias) · recebido hoje ${brl(r.recebFiado)}`,
-    `Jogos: ${brl(r.jogos)}`,
+    `Jogos pagos na hora: ${brl(r.jogos)}`,
+    `Sinuca (fichas): ${sin.total.liquidas} fichas · ${sin.total.partidas} partidas · ${brl(sin.total.receita)}` + (sin.total.estornadas ? ` · ${sin.total.estornadas} estornadas` : ''),
+    ...sin.linhas.map((l) => `· ${l.mesa.nome}: ${l.liquidas} fichas, ${brl(l.receita)}${l.conf && l.conf.ts >= ini && l.conf.dif ? ` · cofre ${l.conf.dif > 0 ? '+' : ''}${l.conf.dif}` : ''}`),
+    alertFichas.length ? `Alertas de fichas: ${alertFichas.length}` : '',
     `Estoque: ${r.abaixo.length} itens abaixo do mínimo · compra sugerida ${brl(r.sug.reduce((a, x) => a + x.valor, 0))}`,
     r.cancel.length ? `Cancelamentos: ${r.cancel.length}` : '',
     ...turnos.map((t) => `Turno ${t.operador} ${hora(t.abertoEm)}–${hora(t.fechadoEm)}: ${Math.abs(t.diferenca) < 0.01 ? 'caixa conferiu' : 'diferença ' + brl(t.diferenca)}`),
@@ -64,7 +70,13 @@ export default function Relatorio() {
           {div.pessoas.slice(0, 3).map(([n, v]) => <L key={n} a={'· ' + n} b={brl(v.valor)} />)}
         </Sec>
         <Sec t="Mais vendidos (sistema novo)">{r.maisVendidos.length ? r.maisVendidos.map(([n, q], k) => <L key={n} a={k + 1 + '. ' + n} b={q + ' un.'} />) : <span className="muted">Sem dados ainda</span>}</Sec>
-        <Sec t="Jogos">{Object.entries(jogosPorTipo).map(([k, v]) => <L key={k} a={k} b={brl(v)} />)}<L a="Total" b={brl(r.jogos)} /></Sec>
+        <Sec t="Sinuca por mesa (fichas)" bg={alertFichas.length ? 'var(--bad-soft)' : undefined}>
+          {sin.linhas.map((l) => <L key={l.mesa.id} a={`${l.mesa.nome} · ${l.liquidas} ficha(s) · ${l.partidas} partida(s)${l.estornadas ? ' · ' + l.estornadas + ' estornada(s)' : ''}`} b={brl(l.receita)} />)}
+          <L a={`Total · ${sin.total.liquidas} fichas`} b={brl(sin.total.receita)} />
+          {sin.linhas.filter((l) => l.conf && l.conf.ts >= ini).map((l) => <L key={'c' + l.mesa.id} a={'Cofre ' + l.mesa.nome + ' (' + hora(l.conf.ts) + ', ' + l.conf.por + ')'} b={l.conf.dif ? (l.conf.dif > 0 ? '+' : '') + l.conf.dif + ' ficha(s)' : 'Conferiu'} cls={l.conf.dif ? 'bad' : 'ok'} />)}
+          {alertFichas.slice(0, 5).map((a) => <span key={a.id} className="small bad">{hora(a.ts)} · {a.texto}</span>)}
+        </Sec>
+        <Sec t="Jogos pagos na hora">{Object.entries(jogosPorTipo).map(([k, v]) => <L key={k} a={k} b={brl(v)} />)}<L a="Total" b={brl(r.jogos)} /></Sec>
         <Sec t="Turnos de caixa">
           {!turnos.length && <span className="muted">Nenhum turno fechado hoje ainda</span>}
           {turnos.map((t) => <L key={t.id} a={t.operador + ' · ' + hora(t.abertoEm) + ' às ' + hora(t.fechadoEm)} b={Math.abs(t.diferenca) < 0.01 ? 'Conferiu' : (t.diferenca < 0 ? 'Faltou ' : 'Sobrou ') + brl(Math.abs(t.diferenca))} cls={Math.abs(t.diferenca) < 0.01 ? 'ok' : 'bad'} />)}

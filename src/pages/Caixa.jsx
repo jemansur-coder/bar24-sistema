@@ -1,12 +1,88 @@
+import { BotaoPOS } from '../integracoes/BotaoPOS.jsx';
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useRota } from '../router.jsx';
+import { Link, ir, useRota } from '../router.jsx';
 import { useOperador } from '../sessao.jsx';
 import { AbrirTurno } from './Turno.jsx';
 import { EsgotadosModal } from '../esgotados.jsx';
-import { A, METODOS, brl, desde, ehGestor, nomeCliente, quem, totalComanda, useNow, useStore } from '../store.jsx';
+import { A, METODOS, brl, desde, ehGestor, hora, nomeCliente, quem, totalComanda, useNow, useStore } from '../store.jsx';
 import { CATEGORIAS } from '../seed.js';
-import { Modal } from '../ui.jsx';
+import { Logo, Modal } from '../ui.jsx';
 import { FotoProduto } from '../fotos.jsx';
+
+// abrir a pré-conta de uma comanda a partir de qualquer tela (ex.: aviso "pediu a conta")
+let contaParaAbrir = null;
+export function abrirConta(comandaId) {
+  contaParaAbrir = comandaId;
+  window.dispatchEvent(new Event('bar24-abrir-conta'));
+  ir('caixa-' + comandaId);
+}
+
+// Pré-conta (conferência) que o caixa imprime e o garçom leva à mesa. Não é documento fiscal.
+export function PreConta({ comanda: c, onClose }) {
+  const { s } = useStore();
+  const t = totalComanda(c, s.config);
+  const mesa = c.mesaId ? s.mesasSalao.find((m) => m.id === c.mesaId)?.nome : 'Balcão';
+  const linhas = c.itens.filter((i) => i.status !== 'pendente');
+  return (
+    <Modal titulo={'Conta · ' + mesa} onClose={onClose} largura={440}>
+      <div className="col" style={{ gap: 6, background: '#fff', color: '#111', borderRadius: 12, padding: '18px 18px 14px', fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 13, border: '1px dashed #bbb' }}>
+        <div className="col" style={{ alignItems: 'center', gap: 2 }}>
+          <Logo size={34} />
+          <b style={{ fontSize: 15 }}>{s.config.nomeBar.toUpperCase()}</b>
+          <span>CONFERÊNCIA DE CONTA</span>
+          <span>{mesa} · Comanda {c.numero} · {c.pessoas} pessoa(s)</span>
+          <span>Garçom {c.garcom} · {hora(Date.now())}</span>
+        </div>
+        <div style={{ borderTop: '1px dashed #999', margin: '6px 0' }} />
+        {linhas.map((i) => <div key={i.id} className="row between"><span>{i.qtd}× {i.nome}</span><span>{brl(i.preco * i.qtd)}</span></div>)}
+        <div style={{ borderTop: '1px dashed #999', margin: '6px 0' }} />
+        <div className="row between"><span>Subtotal</span><span>{brl(t.sub)}</span></div>
+        {c.servico && <div className="row between"><span>Serviço ({s.config.servico}%)</span><span>{brl(t.serv)}</span></div>}
+        {t.pago > 0 && <div className="row between"><span>Já pago</span><span>−{brl(t.pago)}</span></div>}
+        <div className="row between" style={{ fontSize: 17 }}><b>TOTAL</b><b>{brl(t.falta)}</b></div>
+        {c.pessoas > 1 && <div className="row between"><span>Por pessoa ({c.pessoas})</span><span>{brl(Math.ceil((t.falta / c.pessoas) * 100) / 100)}</span></div>}
+        <div style={{ borderTop: '1px dashed #999', margin: '6px 0' }} />
+        <span style={{ textAlign: 'center' }}>Pague com o garçom na maquininha ou no Pix pelo tablet da mesa.</span>
+        <span style={{ textAlign: 'center', fontSize: 11 }}>Não é documento fiscal</span>
+      </div>
+      <span className="small ok"><b>Garçom {c.garcom} avisado na maquininha para levar a conta.</b></span>
+      <button type="button" className="btn primary big" onClick={() => { try { if (!navigator.webdriver) window.print(); } catch (e) { /* sem impressora */ } onClose(); }}>Imprimir conta</button>
+    </Modal>
+  );
+}
+
+// O caixa acompanha os pedidos da cozinha: na fila, em preparo, pronto.
+function AcompanhaCozinha() {
+  const { s } = useStore();
+  const now = useNow(5000);
+  const lista = [];
+  for (const c of s.comandas) {
+    if (c.status !== 'aberta') continue;
+    const g = {};
+    for (const i of c.itens) if (i.destino === 'cozinha' && ['enviado', 'preparo', 'pronto'].includes(i.status)) (g[i.envio] = g[i.envio] || []).push(i);
+    for (const [envio, itens] of Object.entries(g)) {
+      const st = itens.some((i) => i.status === 'enviado') ? 'enviado' : itens.some((i) => i.status === 'preparo') ? 'preparo' : 'pronto';
+      lista.push({ c, envio, itens, st, ts: itens[0].enviadoEm });
+    }
+  }
+  if (!lista.length) return null;
+  lista.sort((a, b) => a.ts - b.ts);
+  const COR = { enviado: ['Na fila', 'var(--accent)'], preparo: ['Em preparo', 'var(--info)'], pronto: ['Pronto · garçom avisado', 'var(--ok)'] };
+  return (
+    <section className="card tight col" style={{ marginBottom: 16, gap: 8 }} aria-label="Pedidos na cozinha">
+      <b className="small muted">COZINHA AGORA</b>
+      <div className="row wrap" style={{ gap: 8 }}>
+        {lista.map(({ c, envio, itens, st, ts }) => (
+          <div key={envio} className="col" style={{ gap: 2, padding: '8px 12px', borderRadius: 12, border: '2px solid ' + COR[st][1], minWidth: 180 }}>
+            <b style={{ fontSize: 13 }}>{c.mesaId ? s.mesasSalao.find((m) => m.id === c.mesaId)?.nome : 'Balcão'} · {c.numero} · há {desde(ts, now)}</b>
+            <span className="small">{itens.map((i) => i.qtd + '× ' + i.nome).join(', ')}</span>
+            <b className="small" style={{ color: COR[st][1] }}>{COR[st][0]}</b>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 const STATUS_ITEM = {
   pendente: ['Pendente de envio', 'accent'],
@@ -60,7 +136,8 @@ export function Pagamento({ comanda, onClose }) {
   const [clienteId, setCliente] = useState(comanda.clienteId || '');
   const [nota, setNota] = useState(true);
   const [cpf, setCpf] = useState('');
-  const [pixOk, setPixOk] = useState(false);
+  const [pixOk, setPixOk] = useState(null); // resultado da cobrança (integracoes/pagamento.js)
+  const [cartaoOk, setCartaoOk] = useState(null);
   const v = Math.min(t.falta, parseFloat(String(valor).replace(',', '.')) || 0);
   const rec = parseFloat(String(recebido).replace(',', '.')) || 0;
   const cl = s.clientes.find((c) => c.id === clienteId);
@@ -69,13 +146,13 @@ export function Pagamento({ comanda, onClose }) {
 
   const pagar = () => {
     act((d) => {
-      A.pagar(d, comanda.id, metodo, v, metodo === 'fiado' ? clienteId : null);
+      A.pagar(d, comanda.id, metodo, v, metodo === 'fiado' ? clienteId : null, (metodo === 'cartao' ? cartaoOk : metodo === 'pix' ? pixOk : null)?.nsu || null);
       const c = d.comandas.find((x) => x.id === comanda.id);
       if (totalComanda(c, d.config).falta <= 0.001) A.fecharComanda(d, comanda.id, { nota, cpf });
     });
     const restante = Math.round((t.falta - v) * 100) / 100;
     if (restante <= 0.001) onClose(true);
-    else { setValor(restante.toFixed(2).replace('.', ',')); setRecebido(''); setPixOk(false); }
+    else { setValor(restante.toFixed(2).replace('.', ',')); setRecebido(''); setPixOk(null); setCartaoOk(null); }
   };
 
   return (
@@ -95,7 +172,15 @@ export function Pagamento({ comanda, onClose }) {
           {rec > 0 && <span style={{ fontSize: 16, color: 'var(--text)' }}>Troco: <b className="num">{brl(Math.max(0, rec - v))}</b></span>}
         </label>
       )}
-      {metodo === 'cartao' && <div className="card tight muted">Na versão final o valor vai direto para a maquininha (débito ou crédito), sem digitar de novo.</div>}
+      {metodo === 'cartao' && (
+        <div className="card tight row" style={{ alignItems: 'center', gap: 12 }}>
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20M6 15h4" /></svg>
+          <div className="col" style={{ gap: 6 }}>
+            <span className="muted small">{cartaoOk ? 'Cartão aprovado.' : 'Aproxime, insira ou passe o cartão na maquininha (débito ou crédito).'}</span>
+            <BotaoPOS valor={v} metodo="cartao" descricao={'Comanda ' + comanda.numero} referencia={comanda.id} aprovado={cartaoOk} onAprovado={setCartaoOk} />
+          </div>
+        </div>
+      )}
       {metodo === 'pix' && (
         <div className="card tight row" style={{ alignItems: 'flex-start' }}>
           <svg width="96" height="96" viewBox="0 0 29 29" aria-label="QR Code Pix de exemplo" role="img" style={{ background: '#fff', borderRadius: 8, padding: 4, flex: 'none' }}>
@@ -103,7 +188,7 @@ export function Pagamento({ comanda, onClose }) {
           </svg>
           <div className="col" style={{ gap: 6 }}>
             <span className="muted small">Pix dinâmico de {brl(v)}. Na versão final a confirmação chega sozinha pelo banco.</span>
-            {pixOk ? <span className="ok"><b>Pagamento confirmado</b></span> : <button type="button" className="btn sm" onClick={() => setPixOk(true)}>Simular confirmação</button>}
+            <BotaoPOS valor={v} metodo="pix" descricao={'Comanda ' + comanda.numero} referencia={comanda.id} aprovado={pixOk} onAprovado={setPixOk} />
           </div>
         </div>
       )}
@@ -118,7 +203,7 @@ export function Pagamento({ comanda, onClose }) {
       )}
       <label className="row" style={{ gap: 8 }}><input type="checkbox" checked={nota} onChange={(e) => setNota(e.target.checked)} /> Emitir NFC-e ao fechar</label>
       {nota && <label className="field">CPF na nota (opcional)<input className="input" value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="000.000.000-00" /></label>}
-      <button type="button" className="btn primary big" disabled={!podePagar || (metodo === 'pix' && !pixOk)} onClick={pagar}>
+      <button type="button" className="btn primary big" disabled={!podePagar || (metodo === 'pix' && !pixOk) || (metodo === 'cartao' && !cartaoOk)} onClick={pagar}>
         {v >= t.falta - 0.001 ? 'Confirmar e fechar comanda' : 'Confirmar ' + brl(v) + ' e continuar'}
       </button>
     </Modal>
@@ -186,7 +271,8 @@ export function ItensComanda({ c, editavel = true }) {
             </div>
             <div className="col" style={{ alignItems: 'flex-end', gap: 4 }}>
               <span className="num" style={{ fontWeight: 600 }}>{brl(i.preco * i.qtd)}</span>
-              {editavel && i.status !== 'pendente' && (
+              {i.fichaMesaId && <span className="small muted">estorno só pela mesa</span>}
+              {editavel && i.status !== 'pendente' && !i.fichaMesaId && (
                 <button type="button" className="btn sm ghost" onClick={() => setCancelando(i)}>Cancelar</button>
               )}
             </div>
@@ -220,6 +306,13 @@ export default function Caixa() {
   const [nova, setNova] = useState(false);
   const [pagando, setPagando] = useState(false);
   const [msg, setMsg] = useState('');
+  const [preConta, setPreConta] = useState(null);
+  useEffect(() => {
+    const abrir = () => { if (contaParaAbrir) { setSel(contaParaAbrir); setPreConta(contaParaAbrir); contaParaAbrir = null; } };
+    abrir();
+    window.addEventListener('bar24-abrir-conta', abrir);
+    return () => window.removeEventListener('bar24-abrir-conta', abrir);
+  }, []);
   const c = abertas.find((x) => x.id === selId);
   const cli = c && s.clientes.find((x) => x.id === c.clienteId);
   const t = c && totalComanda(c, s.config);
@@ -242,6 +335,7 @@ export default function Caixa() {
         <div className="row wrap"><Link className="btn" to="salao">Mapa do salão</Link><Link className="btn" to="turno">Turno e caixa</Link></div>
       </div>
       {!s.caixa.aberto && <div style={{ marginBottom: 16 }}><AbrirTurno compacto /></div>}
+      <AcompanhaCozinha />
       <div className="caixa">
         <section className="card col" aria-label="Comandas abertas">
           <label className="field">Buscar comanda ou cliente<input className="input" value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Ex.: 940 ou Goiote" /></label>
@@ -277,8 +371,9 @@ export default function Caixa() {
             {msg && <div className="small ok">{msg}</div>}
             <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <button type="button" className="btn" disabled={!pend} onClick={() => { const n = act((d) => A.enviar(d, c.id, 'caixa')); setMsg(n + ' item(ns) enviados (cozinha recebe os pratos)'); setTimeout(() => setMsg(''), 3000); }}>Enviar pedido{pend ? ' (' + pend + ')' : ''}</button>
-              <button type="button" className="btn" onClick={() => act((d) => { const x = d.comandas.find((k) => k.id === c.id); x.contaPedida = !x.contaPedida; })}>{c.contaPedida ? 'Desmarcar conta' : 'Pediu a conta'}</button>
+              <button type="button" className="btn" disabled={pend > 0 || !t.falta} onClick={() => { act((d) => A.emitirConta(d, c.id)); setPreConta(c.id); }}>Emitir conta</button>
             </div>
+            {c.contaPedida && <button type="button" className="btn sm ghost" onClick={() => act((d) => { const x = d.comandas.find((k) => k.id === c.id); x.contaPedida = false; x.contaEmitidaEm = null; })}>Desmarcar "pediu a conta"</button>}
             <button type="button" className="btn primary big" disabled={!t.falta || pend > 0 || !s.caixa.aberto} onClick={() => setPagando(true)}>
               {!s.caixa.aberto ? 'Abra o turno para receber' : pend > 0 ? 'Envie os itens pendentes antes' : 'Receber ' + brl(t.falta)}
             </button>
@@ -292,6 +387,7 @@ export default function Caixa() {
         </section>
       </div>
       {nova && <NovaComanda onClose={() => setNova(false)} onCriada={(id) => { setSel(id); setNova(false); }} />}
+      {preConta && abertas.find((x) => x.id === preConta) && <PreConta comanda={abertas.find((x) => x.id === preConta)} onClose={() => setPreConta(null)} />}
       {pagando && c && <Pagamento comanda={c} onClose={(fechou) => { setPagando(false); if (fechou) setSel(abertas.find((x) => x.id !== c.id)?.id); }} />}
     </>
   );
