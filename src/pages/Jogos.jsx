@@ -4,6 +4,8 @@ import { Link } from '../router.jsx';
 import { A, METODOS, brl, desde, estadoMesa, hora, mmss, nomeCliente, relogioMesa, tipoJogo, useNow, useStore } from '../store.jsx';
 import { TIPOS_JOGO } from '../seed.js';
 import { Modal } from '../ui.jsx';
+import { ControleFichas, GerenciarFicha, VenderFichas } from './SinucaControle.jsx';
+import { precoFicha, saldoFichas } from '../sinuca.js';
 
 const STATUS = { livre: ['LIVRE', 'off'], jogo: ['EM JOGO', 'ok'], acabando: ['ACABANDO', 'warn'], esgotado: ['ESGOTADO', 'bad'] };
 
@@ -13,29 +15,7 @@ function Gerenciar({ mesa, onClose }) {
   const [metodo, setMetodo] = useState('dinheiro');
   const se = mesa.sessao; const t = tipoJogo(se.jogo);
   const add = (min) => { act((d) => A.maisTempo(d, mesa.id, min, metodo)); onClose(); };
-  if (se.jogo === 'ficha') return (
-    <Modal titulo={mesa.nome} onClose={onClose}>
-      <div className="row between"><span className="muted">Sinuca por ficha · cada ficha é uma partida</span><span className="muted">Mesa aberta às {hora(se.inicio)}</span></div>
-      <div className="display num" style={{ fontSize: 56, fontWeight: 700, textAlign: 'center' }}>Ficha {se.fichas}</div>
-      <div className="row between"><span className="muted">Partida atual começou há</span><b className="num">{desde(se.fichaEm || se.inicio, now)}</b></div>
-      <div className="row between"><span className="muted">Fichas da mesa até agora</span><b className="num">{se.fichas} × {brl(t.preco)} = {brl(se.valor)}</b></div>
-      {!se.comandaId && (
-        <div className="field">Cobrar fichas em
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 8 }}>
-            {['dinheiro', 'cartao', 'pix'].map((k) => <button key={k} type="button" className={'btn' + (metodo === k ? ' sel' : '')} onClick={() => setMetodo(k)}>{METODOS[k]}</button>)}
-          </div>
-        </div>
-      )}
-      {se.comandaId && <span className="small muted">As fichas entram na comanda vinculada.</span>}
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 8 }}>
-        {[1, 2, 5].map((q) => <button key={q} type="button" className="btn primary" onClick={() => { act((d) => A.maisFicha(d, mesa.id, q, metodo)); onClose(); }}>+{q} ficha{q > 1 ? 's' : ''} ({brl(t.preco * q)})</button>)}
-      </div>
-      <div className="row wrap">
-        <Link className="btn" to={'parede-' + mesa.id}>Abrir tela da parede</Link>
-        <button type="button" className="btn danger" onClick={() => { act((d) => A.encerrarJogo(d, mesa.id)); onClose(); }}>Encerrar e liberar mesa</button>
-      </div>
-    </Modal>
-  );
+  if (se.jogo === 'ficha') return <GerenciarFicha mesa={mesa} onClose={onClose} />;
   return (
     <Modal titulo={mesa.nome} onClose={onClose}>
       <div className="row between"><span className="muted">{t.nome} · {se.jogadores} jogador(es)</span><span className="muted">Início {hora(se.inicio)} · fim {hora(se.fim)}</span></div>
@@ -97,7 +77,7 @@ export default function Jogos() {
   return (
     <>
       <div className="topbar">
-        <div className="col" style={{ gap: 2 }}><h1>Jogos</h1><span className="muted">Sinuca, ronda, pife e cartas com cronômetro</span></div>
+        <div className="col" style={{ gap: 2 }}><h1>Jogos</h1><span className="muted">Sinuca por ficha ({brl(precoFicha(s))} a partida, controle por mesa) · cartas por tempo</span></div>
         <Link className="btn" to="parede">Abrir telas da parede</Link>
       </div>
       <div className="row wrap" style={{ alignItems: 'flex-start', gap: 20 }}>
@@ -128,17 +108,20 @@ export default function Jogos() {
           </div>
           <div className="mesas">
             {s.mesas.map((m) => {
-              const e = estadoMesa(m, now, s.config.avisoMin); const [lbl, cls] = STATUS[e];
+              const e = estadoMesa(m, now, s.config.avisoMin); const [lbl, cls] = m.sessao?.jogo === 'ficha' && e === 'acabando' ? ['ÚLTIMA FICHA', 'warn'] : STATUS[e];
               const se = m.sessao; const tj = se && tipoJogo(se.jogo);
               const cmd = se?.comandaId && s.comandas.find((c) => c.id === se.comandaId);
               return (
                 <div key={m.id} className={'mesa ' + e}>
                   <div className="row between"><b className="display" style={{ fontSize: 18 }}>{m.nome}</b><span className={'pill ' + cls}>{lbl}</span></div>
                   <span className={'t ' + (e === 'esgotado' ? 'bad' : e === 'acabando' ? 'accent' : e === 'livre' ? 'muted' : '')}>{relogioMesa(m, now)}</span>
-                  <span className="small muted">{se ? (se.jogo === 'ficha' ? `${se.fichas} ficha(s) · ${brl(se.valor)} · partida há ${desde(se.fichaEm || se.inicio, now)}` : `${tj.nome} · ${se.jogadores} jog. · ${brl(se.valor)}`) + (cmd ? ' · comanda ' + cmd.numero : '') : (s.fila.find((f) => f.status === 'chamado' && f.mesaJogoId === m.id) ? 'Reservada para ' + s.fila.find((f) => f.status === 'chamado' && f.mesaJogoId === m.id).nome + ' (fila)' : 'Disponível')}</span>
+                  <span className="small muted">{se ? (se.jogo === 'ficha' ? `${se.fichas} vendida(s) · saldo ${saldoFichas(se)} · ${brl(se.valor)} · partida há ${desde(se.partidaEm || se.inicio, now)}` : `${tj.nome} · ${se.jogadores} jog. · ${brl(se.valor)}`) + (cmd ? ' · comanda ' + cmd.numero : '') : (s.fila.find((f) => f.status === 'chamado' && f.mesaJogoId === m.id) ? 'Reservada para ' + s.fila.find((f) => f.status === 'chamado' && f.mesaJogoId === m.id).nome + ' (fila)' : 'Disponível')}</span>
                   <div className="row wrap" style={{ marginTop: 'auto', gap: 6 }}>
-                    {se?.jogo === 'ficha' && <button type="button" className="btn sm primary" onClick={() => act((d) => A.maisFicha(d, m.id, 1, 'dinheiro'))}>+1 ficha</button>}
-                    {se ? <button type="button" className={'btn sm' + (e === 'esgotado' ? ' danger' : '')} onClick={() => ir('jogos-' + m.id)}>{e === 'esgotado' ? 'Renovar / encerrar' : 'Gerenciar'}</button>
+                    {se?.jogo === 'ficha' && (saldoFichas(se) > 0
+                      ? <button type="button" className="btn sm primary" onClick={() => act((d) => A.novaPartida(d, m.id))}>Próxima partida</button>
+                      : cmd ? <button type="button" className="btn sm primary" onClick={() => act((d) => A.maisFicha(d, m.id, 1))}>+1 ficha na {cmd.numero}</button>
+                        : <button type="button" className="btn sm primary" onClick={() => ir('jogos-' + m.id)}>Vender ficha</button>)}
+                    {se ? <button type="button" className={'btn sm' + (e === 'esgotado' ? ' danger' : '')} onClick={() => ir('jogos-' + m.id)}>{e === 'esgotado' ? 'Renovar / encerrar' : se.jogo === 'ficha' ? 'Fichas / encerrar' : 'Gerenciar'}</button>
                       : <button type="button" className="btn sm" onClick={() => { setMesa(m.id); setJogo(m.tipo === 'sinuca' ? 'ficha' : 'pife'); }}>Iniciar aqui</button>}
                     <Link className="btn sm ghost" to={'parede-' + m.id}>Tela</Link>
                   </div>
@@ -152,18 +135,19 @@ export default function Jogos() {
           <h2>Iniciar jogo</h2>
           <div className="field">Local
             <div className="grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 8 }}>
-              {s.mesas.map((m) => <button key={m.id} type="button" disabled={!!m.sessao} className={'btn sm' + (m.id === mesaId ? ' sel' : '')} onClick={() => setMesa(m.id)}>{m.nome}</button>)}
+              {s.mesas.map((m) => <button key={m.id} type="button" disabled={!!m.sessao || m.tipo !== t.mesa} className={'btn sm' + (m.id === mesaId ? ' sel' : '')} onClick={() => setMesa(m.id)}>{m.nome}</button>)}
             </div>
           </div>
           <div className="field">Jogo
             <div className="grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 8 }}>
               {TIPOS_JOGO.map((tj) => (
                 <button key={tj.id} type="button" className={'btn' + (jogo === tj.id ? ' sel' : '')} style={{ height: 60, flexDirection: 'column', gap: 0 }} onClick={() => { setJogo(tj.id); const atual = s.mesas.find((m) => m.id === mesaId); if (!atual || atual.sessao || atual.tipo !== tj.mesa) { const alt = s.mesas.find((m) => !m.sessao && m.tipo === tj.mesa); if (alt) setMesa(alt.id); } }}>
-                  <span>{tj.nome.replace(' sinuca', '')}</span><span className="small accent">{brl(tj.preco)}/{tj.porFicha ? 'ficha' : 'pessoa'}</span>
+                  <span>{tj.nome.replace(' sinuca', '')}</span><span className="small accent">{brl(tj.porFicha ? precoFicha(s) : tj.preco)}/{tj.porFicha ? 'ficha' : 'pessoa'}</span>
                 </button>
               ))}
             </div>
           </div>
+          {t.porFicha ? (mesaSel?.tipo === 'sinuca' ? <VenderFichas key={mesaSel.id} mesa={mesaSel} onFeito={(txt) => { setOk(mesaSel.nome + ' aberta: ' + txt); setTimeout(() => setOk(''), 4000); setMesa(s.mesas.find((m) => !m.sessao && m.id !== mesaId && m.tipo === 'sinuca')?.id || ''); }} /> : <div className="empty">Escolha uma mesa de sinuca livre</div>) : (<>
           <div className="field">{t.porFicha ? 'Fichas (cada ficha é uma partida)' : 'Jogadores'}
             <div className="row">
               <button type="button" className="btn" onClick={() => setJogadores(Math.max(1, jogadores - 1))} aria-label={t.porFicha ? 'Menos uma ficha' : 'Menos um jogador'}>−</button>
@@ -196,8 +180,11 @@ export default function Jogos() {
           <button type="button" className="btn primary big" disabled={!mesaSel || (cobranca === 'comanda' && !comandaId)} onClick={iniciar}>
             {mesaSel ? (cobranca === 'comanda' ? 'Lançar na comanda e iniciar' : 'Cobrar e iniciar') : 'Escolha uma mesa livre'}
           </button>
+          </>)}
+          {t.porFicha && ok && <div className="ok">{ok}</div>}
         </section>
       </div>
+      <ControleFichas />
       {ger && <Gerenciar mesa={ger} onClose={() => ir('jogos')} />}
     </>
   );

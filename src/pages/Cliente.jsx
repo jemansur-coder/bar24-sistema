@@ -259,9 +259,29 @@ function Despedida({ mesa }) {
   );
 }
 
+// Tablet fixo da mesa (modo quiosque, ex.: Fully Kiosk apontando para #mesa-<id>?quiosque=1):
+// sem link para o sistema, volta sozinho ao cardápio depois de 2 min parado e mantém a tela acesa.
+export const emQuiosque = () => { try { return /quiosque|kiosk/i.test(window.location.search + window.location.hash) || /Fully/i.test(navigator.userAgent); } catch (e) { return false; } };
+function useQuiosque(voltar) {
+  useEffect(() => {
+    if (!emQuiosque()) return undefined;
+    let lock = null;
+    const pedir = async () => { try { lock = await navigator.wakeLock?.request('screen'); } catch (e) { /* sem wake lock */ } };
+    pedir();
+    const vis = () => { if (document.visibilityState === 'visible') pedir(); };
+    let t = setTimeout(voltar, 120000);
+    const mexeu = () => { clearTimeout(t); t = setTimeout(voltar, 120000); };
+    ['pointerdown', 'keydown', 'scroll'].forEach((ev) => window.addEventListener(ev, mexeu, { passive: true }));
+    document.addEventListener('visibilitychange', vis);
+    return () => { clearTimeout(t); ['pointerdown', 'keydown', 'scroll'].forEach((ev) => window.removeEventListener(ev, mexeu)); document.removeEventListener('visibilitychange', vis); try { lock?.release(); } catch (e) { /* ignora */ } };
+  }, []);
+}
+
 export function ClienteMesa({ mesaId }) {
   const { s } = useStore();
   const [aba, setAba] = useState('cardapio');
+  useQuiosque(() => { setAba('cardapio'); window.scrollTo({ top: 0 }); });
+  const quiosque = emQuiosque();
   const mesa = s.mesasSalao.find((m) => m.id === mesaId);
   if (!mesa) return <div className="main"><div className="empty">QR Code inválido. Fale com o garçom.</div></div>;
   return (
@@ -274,7 +294,7 @@ export function ClienteMesa({ mesaId }) {
       {aba === 'cardapio' && <Cardapio mesa={mesa} />}
       {aba === 'conta' && <Conta mesa={mesa} />}
       {aba === 'jogos' && <FilaJogos />}
-      <div className="small muted" style={{ textAlign: 'center', padding: 24 }}>Visão do cliente · <a href="#qrcodes">voltar ao sistema</a></div>
+      {quiosque ? <div style={{ height: 32 }} /> : <div className="small muted" style={{ textAlign: 'center', padding: 24 }}>Visão do cliente · <a href="#qrcodes">voltar ao sistema</a></div>}
     </div>
   );
 }

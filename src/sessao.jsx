@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { setOperadorAtual, useStore } from './store.jsx';
+import { ehGestor, setOperadorAtual, useStore } from './store.jsx';
 import { Logo, TemaBtn } from './ui.jsx';
 import { PAPEIS } from './seed.js';
 
@@ -114,4 +114,21 @@ export function TelaPin({ onEntrar, titulo = 'Quem está usando?' }) {
       )}
     </div>
   );
+}
+
+// Autorização de gerente/dono para ações sensíveis (estorno, saída sem venda...).
+// Se quem está logado já é gestor, autoriza direto; senão pede o PIN de um gestor.
+export function usePinGestor(texto = 'PIN do gerente ou do dono para autorizar') {
+  const { s } = useStore();
+  const { usuario } = useOperador();
+  const [pin, setPin] = useState('');
+  const gestor = ehGestor(usuario);
+  const aut = gestor ? usuario : s.usuarios.find((u) => u.pin === pin && ehGestor(u) && u.ativo);
+  const campo = gestor ? <span className="small muted">Você ({usuario.nome}) autoriza. Fica registrado no seu nome.</span> : (
+    <label className="field">{texto}
+      <input className="input" type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} />
+      {pin.length === 4 && !aut && <span className="bad">PIN não autorizado</span>}
+    </label>
+  );
+  return { aut, campo, limpar: () => setPin('') };
 }

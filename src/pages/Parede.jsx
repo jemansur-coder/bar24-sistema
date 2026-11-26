@@ -1,5 +1,6 @@
 import { Link } from '../router.jsx';
 import { brl, estadoMesa, hora, mmss, relogioMesa, tipoJogo, useNow, useStore } from '../store.jsx';
+import { precoFicha, saldoFichas } from '../sinuca.js';
 import { Logo } from '../ui.jsx';
 import { QR, linkPublico } from '../qr.jsx';
 
@@ -61,27 +62,28 @@ export function Parede({ id }) {
   );
 }
 
-// Sinuca por ficha: mostra a ficha (partida) atual, o tempo da partida e quanto a mesa já jogou.
+// Sinuca por ficha: mostra a ficha (partida) atual, quantas fichas ainda restam e quanto a mesa já jogou.
 function ParedeFicha({ m, now }) {
   const { s } = useStore();
-  const se = m.sessao; const t = tipoJogo('ficha');
+  const se = m.sessao; const saldo = saldoFichas(se);
   const novaFicha = now - (se.fichaEm || se.inicio) < 6000;
+  const cor = novaFicha ? '#FFC21A' : saldo ? '#34C77B' : '#FFC21A';
   return (
-    <div className="wall jogo">
+    <div className={'wall ' + (saldo ? 'jogo' : 'acabando')}>
       <header className="row between wrap">
         <div className="row" style={{ gap: 20 }}><Logo size={64} /><span className="display" style={{ fontSize: 'clamp(32px, 5vw, 64px)', fontWeight: 700 }}>{m.nome.toUpperCase()}</span></div>
-        <span style={{ fontSize: 'clamp(18px, 2.4vw, 32px)', color: '#D4D4D8' }}>Sinuca por ficha · {brl(t.preco)} a ficha</span>
+        <span style={{ fontSize: 'clamp(18px, 2.4vw, 32px)', color: '#D4D4D8' }}>Sinuca por ficha · {brl(precoFicha(s))} a partida</span>
       </header>
       <div className="center">
-        <div className="col" style={{ alignItems: 'center', gap: 4, minWidth: 260, padding: '28px 40px', borderRadius: 32, border: '6px solid ' + (novaFicha ? '#FFC21A' : '#34C77B'), background: novaFicha ? 'rgba(255,194,26,.12)' : 'rgba(52,199,123,.08)', transition: 'all .4s' }}>
+        <div className="col" style={{ alignItems: 'center', gap: 4, minWidth: 260, padding: '28px 40px', borderRadius: 32, border: '6px solid ' + cor, background: novaFicha || !saldo ? 'rgba(255,194,26,.12)' : 'rgba(52,199,123,.08)', transition: 'all .4s' }}>
           <span style={{ fontSize: 'clamp(16px, 2vw, 26px)', letterSpacing: 4, color: '#D4D4D8', fontWeight: 600 }}>FICHA</span>
-          <span className="display num" style={{ fontSize: 'clamp(110px, 16vw, 220px)', fontWeight: 700, lineHeight: 1 }}>{se.fichas}</span>
-          <span style={{ fontSize: 'clamp(16px, 2vw, 24px)', color: '#D4D4D8' }}>partida em andamento</span>
+          <span className="display num" style={{ fontSize: 'clamp(110px, 16vw, 220px)', fontWeight: 700, lineHeight: 1 }}>{se.usadas}</span>
+          <span style={{ fontSize: 'clamp(16px, 2vw, 24px)', color: '#D4D4D8' }}>de {se.fichas} comprada(s)</span>
         </div>
         <div className="col" style={{ maxWidth: 640, gap: 20 }}>
-          <span className="display" style={{ fontSize: 'clamp(40px, 6vw, 84px)', fontWeight: 700, lineHeight: 1.05, color: novaFicha ? '#FFC21A' : '#fff' }}>{novaFicha ? 'Nova ficha lançada!' : 'Bom jogo!'}</span>
-          <span style={{ fontSize: 'clamp(20px, 2.6vw, 36px)', color: '#D4D4D8', lineHeight: 1.35 }}>Partida atual: <b className="num" style={{ color: '#fff' }}>{mmss(now - (se.fichaEm || se.inicio))}</b><br />Fichas desta mesa: <b style={{ color: '#fff' }}>{se.fichas} · {brl(se.valor)}</b></span>
-          <span style={{ fontSize: 'clamp(16px, 2vw, 26px)', color: '#A1A1AA' }}>Acabou a partida? Peça a próxima ficha ao garçom ou no caixa.</span>
+          <span className="display" style={{ fontSize: 'clamp(40px, 6vw, 84px)', fontWeight: 700, lineHeight: 1.05, color: novaFicha || !saldo ? '#FFC21A' : '#fff' }}>{novaFicha ? 'Nova partida liberada!' : saldo ? 'Bom jogo!' : 'Última ficha'}</span>
+          <span style={{ fontSize: 'clamp(20px, 2.6vw, 36px)', color: '#D4D4D8', lineHeight: 1.35 }}>Partida atual: <b className="num" style={{ color: '#fff' }}>{mmss(Math.max(0, now - (se.partidaEm || se.inicio)))}</b><br />Fichas restantes: <b style={{ color: saldo ? '#fff' : '#FFC21A' }}>{saldo}</b> · mesa: <b style={{ color: '#fff' }}>{brl(se.valor)}</b></span>
+          <span style={{ fontSize: 'clamp(16px, 2vw, 26px)', color: '#A1A1AA' }}>{saldo ? 'Acabou a partida? A próxima ficha já está paga: é só avisar.' : 'Quer jogar mais? Peça a próxima ficha ao garçom ou no caixa.'}</span>
         </div>
       </div>
       {s.fila.some((f) => f.tipo === m.tipo) && <FilaFaixa tipo={m.tipo} />}
@@ -109,7 +111,7 @@ export function ParedeTodas() {
           <Link key={m.id} to={'parede-' + m.id} style={{ background: bg, border: '3px solid ' + bd, borderRadius: 20, padding: 24, color: '#fff', textDecoration: 'none', display: 'flex', flexDirection: 'column', gap: 8, animation: e === 'esgotado' ? 'pisca 1s infinite' : undefined }}>
             <span className="display" style={{ fontSize: 30, fontWeight: 700 }}>{m.nome}</span>
             <span className="display num" style={{ fontSize: 72, fontWeight: 700 }}>{se ? relogioMesa(m, now) : 'LIVRE'}</span>
-            <span style={{ fontSize: 20, color: '#D4D4D8' }}>{!se && s.fila.find((f) => f.status === 'chamado' && f.mesaJogoId === m.id) ? 'Próximo: ' + s.fila.find((f) => f.status === 'chamado' && f.mesaJogoId === m.id).nome + ', é a sua vez!' : se ? (e === 'esgotado' ? 'Tempo esgotado · procure o caixa' : se.jogo === 'ficha' ? 'Sinuca · partida há ' + mmss(now - (se.fichaEm || se.inicio)) : tipoJogo(se.jogo).nome + ' · ' + se.jogadores + ' jogador(es)') : 'Disponível'}</span>
+            <span style={{ fontSize: 20, color: '#D4D4D8' }}>{!se && s.fila.find((f) => f.status === 'chamado' && f.mesaJogoId === m.id) ? 'Próximo: ' + s.fila.find((f) => f.status === 'chamado' && f.mesaJogoId === m.id).nome + ', é a sua vez!' : se ? (e === 'esgotado' ? 'Tempo esgotado · procure o caixa' : se.jogo === 'ficha' ? 'Sinuca · ' + saldoFichas(se) + ' ficha(s) restante(s) · partida há ' + mmss(Math.max(0, now - (se.partidaEm || se.inicio))) : tipoJogo(se.jogo).nome + ' · ' + se.jogadores + ' jogador(es)') : 'Disponível'}</span>
           </Link>
         );
       })}

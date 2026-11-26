@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { ehFicha, novaSessaoFicha, precoFicha, saldoFichas, ultimaConferencia, usadasDesde } from './sinuca.js';
 import { seed, TIPOS_JOGO, MESAS_SALAO, DESCRICOES, completarInsumos, historicoEstoque, MOTIVOS_SAIDA } from './seed.js';
 
 const NOVOS_USUARIOS = [
@@ -35,6 +36,16 @@ function load() {
       if (!s.turnos) s.turnos = [];
       // sinuca passou a ser controlada por ficha (partida), sem cronômetro
       s.mesas.forEach((m) => { if (m.sessao?.jogo === 'ficha' && m.sessao.fichas == null) { m.sessao.fichas = m.sessao.jogadores || 1; m.sessao.fim = null; m.sessao.fichaEm = m.sessao.inicio; } });
+      // controle de fichas por mesa: vendidas x usadas, lançamentos, histórico e conferência do cofre
+      s.mesas.forEach((m) => {
+        const se = m.sessao; if (!se || se.jogo !== 'ficha' || se.usadas != null) return;
+        se.usadas = se.fichas; se.estornadas = 0; se.partidaEm = se.fichaEm || se.inicio;
+        se.partidas = Array.from({ length: se.fichas }, (_, k) => se.inicio + k);
+        se.lanc = [{ id: 'lf-mig-' + m.id, ts: se.inicio, qtd: se.fichas, valor: se.valor, cobranca: se.comandaId ? 'comanda' : 'dinheiro', comandaNum: null, por: 'Sistema' }];
+      });
+      if (!s.historicoSinuca) s.historicoSinuca = [];
+      if (!s.conferenciasFichas) s.conferenciasFichas = [];
+      if (s.config.precoFicha == null) s.config.precoFicha = 2;
       // inclui Gilmar e Ingrid só se ainda não existir alguém com o mesmo nome (evita duplicar quem já foi cadastrado à mão)
       const mesmo = (a, b) => a.nome.trim().toLowerCase() === b.nome.trim().toLowerCase();
       NOVOS_USUARIOS.forEach((u) => {
@@ -123,16 +134,18 @@ export function totalComanda(c, cfg) {
 }
 export function estadoMesa(m, now, avisoMin = 5) {
   if (!m.sessao) return 'livre';
-  if (m.sessao.jogo === 'ficha') return 'jogo'; // sinuca por ficha: conta partidas, não tem tempo para acabar
+  // sinuca por ficha: não tem tempo para acabar. Sem saldo = está jogando a última ficha comprada.
+  if (m.sessao.jogo === 'ficha') return saldoFichas(m.sessao) > 0 ? 'jogo' : 'acabando';
   const r = m.sessao.fim - now;
   if (r <= 0) return 'esgotado';
   if (r <= avisoMin * 60000) return 'acabando';
   return 'jogo';
 }
 export const tipoJogo = (id) => TIPOS_JOGO.find((t) => t.id === id);
-export const porFicha = (se) => se?.jogo === 'ficha';
-// o que mostrar no relógio da mesa: fichas na sinuca, tempo restante nas cartas
-export const relogioMesa = (m, now = Date.now()) => (!m.sessao ? '—' : porFicha(m.sessao) ? 'Ficha ' + m.sessao.fichas : mmss(Math.max(0, m.sessao.fim - now)));
+export const porFicha = ehFicha;
+export { precoFicha, saldoFichas };
+// o que mostrar no relógio da mesa: ficha atual / compradas na sinuca, tempo restante nas cartas
+export const relogioMesa = (m, now = Date.now()) => (!m.sessao ? '—' : porFicha(m.sessao) ? 'Ficha ' + (m.sessao.usadas || 0) + '/' + m.sessao.fichas : mmss(Math.max(0, m.sessao.fim - now)));
 
 export function sugestaoCompra(s) {
   return s.insumos.map((i) => {
@@ -252,6 +265,7 @@ export const A = {
   },
   cancelarItem(d, comandaId, itemId, autorizou) {
     const c = d.comandas.find((x) => x.id === comandaId); const i = c?.itens.find((x) => x.id === itemId); if (!i) return;
+    if (i.fichaMesaId) return; // ficha de sinuca sai da conta só pelo estorno da mesa (A.estornarFichas)
     c.itens = c.itens.filter((x) => x.id !== itemId);
     if (i.status !== 'pendente') A.alertaEstoque(d, 'cancelamento', `${i.qtd}× ${i.nome} cancelado depois de sair ${i.destino === 'cozinha' ? 'da cozinha' : 'do bar'} (comanda ${c.numero}, garçom ${c.garcom})`, -i.preco * i.qtd, autorizou);
     A.log(d, `Cancelado ${i.qtd}× ${i.nome} da comanda ${c.numero} (${brl(i.preco * i.qtd)}) · pedido por ${quem()}${autorizou && autorizou !== quem() ? ', autorizado por ' + autorizou : ''}`);
@@ -285,11 +299,11 @@ export const A = {
   entregue(d, comandaId, envio, origem = null) {
     d.comandas.find((x) => x.id === comandaId)?.itens.forEach((i) => { if (i.envio === envio && i.status === 'pronto' && (!origem || (origem === 'cozinha') === (i.destino === 'cozinha'))) { i.status = 'entregue'; i.servidoEm = Date.now(); } });
   },
-  pagar(d, comandaId, metodo, valor, clienteId) {
+  pagar(d, comandaId, metodo, valor, clienteId, ref = null) {
     const c = d.comandas.find((x) => x.id === comandaId); if (!c) return;
     c.pagamentos = c.pagamentos || [];
     c.pagamentos.push({ metodo, valor, clienteId });
-    d.pagamentos.push({ id: uid('pg'), ts: Date.now(), metodo, valor, origem: 'Comanda ' + c.numero, clienteId: clienteId || null, tipo: 'venda', por: quem() });
+    d.pagamentos.push({ id: uid('pg'), ts: Date.now(), metodo, valor, origem: 'Comanda ' + c.numero, clienteId: clienteId || null, tipo: 'venda', por: quem(), ref });
     if (metodo === 'fiado') {
       const cl = d.clientes.find((x) => x.id === clienteId);
       if (cl) { if (!cl.fiado) cl.desde = Date.now(); cl.fiado = Math.round((cl.fiado + valor) * 100) / 100; }
@@ -307,17 +321,23 @@ export const A = {
     if (!cl.fiado) cl.desde = null;
     d.pagamentos.push({ id: uid('pg'), ts: Date.now(), metodo, valor, origem: 'Recebimento de fiado · ' + cl.nome, clienteId, tipo: 'recebimento' });
   },
-  iniciarJogo(d, mesaId, { jogo, jogadores, minutos, metodo, comandaId }) {
+  iniciarJogo(d, mesaId, { jogo, jogadores, minutos, metodo, comandaId, ref = null }) {
     const m = d.mesas.find((x) => x.id === mesaId); const t = tipoJogo(jogo); if (!m || !t) return;
+    if (m.sessao) return;
     const valor = t.preco * jogadores; const now = Date.now();
-    // sinuca por ficha: "jogadores" é a quantidade de fichas compradas; cada ficha é uma partida
-    m.sessao = jogo === 'ficha'
-      ? { jogo, fichas: jogadores, jogadores: 2, minutos: 0, inicio: now, fim: null, fichaEm: now, valor, comandaId: comandaId || null, visto: false }
-      : { jogo, jogadores, minutos, inicio: now, fim: now + minutos * 60000, valor, comandaId: comandaId || null, visto: false };
     const daFila = d.fila.find((x) => x.status === 'chamado' && x.mesaJogoId === mesaId);
-    if (daFila) m.sessao.jogadorFila = daFila.nome;
     d.fila = d.fila.filter((x) => !(x.status === 'chamado' && x.mesaJogoId === mesaId));
-    const desc = jogo === 'ficha' ? `${jogadores} ficha(s) · ${m.nome}` : `${t.nome} ×${jogadores} · ${m.nome} · ${minutos} min`;
+    if (jogo === 'ficha') {
+      // sinuca por ficha: "jogadores" aqui é a quantidade de fichas compradas; a primeira partida já começa
+      m.sessao = novaSessaoFicha({ comandaId: comandaId || null, now });
+      if (daFila) m.sessao.jogadorFila = daFila.nome;
+      A.log(d, `${m.nome} aberta por ${quem()}`);
+      A.venderFichas(d, mesaId, jogadores, { metodo, comandaId, ref });
+      return;
+    }
+    m.sessao = { jogo, jogadores, minutos, inicio: now, fim: now + minutos * 60000, valor, comandaId: comandaId || null, visto: false };
+    if (daFila) m.sessao.jogadorFila = daFila.nome;
+    const desc = `${t.nome} ×${jogadores} · ${m.nome} · ${minutos} min`;
     if (comandaId) A.addAvulso(d, comandaId, desc, valor, 'jogo');
     else d.pagamentos.push({ id: uid('pg'), ts: now, metodo, valor, origem: `Jogo ${t.nome} · ${m.nome}`, tipo: 'jogo' });
   },
@@ -331,19 +351,105 @@ export const A = {
     if (m.sessao.comandaId && d.comandas.find((c) => c.id === m.sessao.comandaId && c.status === 'aberta')) A.addAvulso(d, m.sessao.comandaId, `+${minutos} min · ${m.nome}`, valor, 'jogo');
     else d.pagamentos.push({ id: uid('pg'), ts: now, metodo: metodo || 'dinheiro', valor, origem: `+${minutos} min · ${m.nome}`, tipo: 'jogo' });
   },
-  // sinuca: mais fichas (cada ficha = uma partida)
-  maisFicha(d, mesaId, qtd = 1, metodo = 'dinheiro') {
-    const m = d.mesas.find((x) => x.id === mesaId); if (!m?.sessao || m.sessao.jogo !== 'ficha') return;
-    const t = tipoJogo('ficha'); const valor = t.preco * qtd;
-    m.sessao.fichas += qtd; m.sessao.valor += valor; m.sessao.fichaEm = Date.now();
-    if (m.sessao.comandaId && d.comandas.find((c) => c.id === m.sessao.comandaId && c.status === 'aberta')) A.addAvulso(d, m.sessao.comandaId, `+${qtd} ficha(s) · ${m.nome}`, valor, 'jogo');
-    else d.pagamentos.push({ id: uid('pg'), ts: Date.now(), metodo, valor, origem: `+${qtd} ficha(s) · ${m.nome}`, tipo: 'jogo' });
-    A.log(d, `+${qtd} ficha(s) na ${m.nome} (${quem()}), total ${m.sessao.fichas}`);
+  // ---------- sinuca por ficha (controle por mesa) ----------
+  // vende fichas para a mesa: lança na comanda vinculada (uma linha "Ficha sinuca · Mesa" com a quantidade)
+  // ou registra o pagamento na hora. Se a mesa ainda não começou nenhuma partida, a primeira já é liberada.
+  venderFichas(d, mesaId, qtd = 1, { metodo = 'dinheiro', comandaId = null, iniciar = 'auto', ref = null } = {}) {
+    const m = d.mesas.find((x) => x.id === mesaId); const se = m?.sessao;
+    if (!se || se.jogo !== 'ficha' || !(qtd > 0)) return;
+    const preco = precoFicha(d); const valor = Math.round(preco * qtd * 100) / 100; const now = Date.now();
+    const cid = comandaId || se.comandaId;
+    const cmd = cid && d.comandas.find((c) => c.id === cid && c.status === 'aberta');
+    if (cmd) {
+      se.comandaId = cmd.id;
+      const it = cmd.itens.find((i) => i.fichaMesaId === m.id && i.preco === preco);
+      if (it) { it.qtd += qtd; it.enviadoEm = now; }
+      else cmd.itens.push({ id: uid('it'), produtoId: null, nome: 'Ficha sinuca · ' + m.nome, preco, qtd, obs: '', destino: 'jogo', status: 'entregue', envio: null, enviadoEm: now, fichaMesaId: m.id, por: quem() });
+    } else {
+      if (se.comandaId) se.comandaId = null; // comanda vinculada já foi fechada
+      d.pagamentos.push({ id: uid('pg'), ts: now, metodo, valor, origem: `Ficha sinuca · ${m.nome}`, tipo: 'jogo', mesaJogoId: m.id, fichas: qtd, por: quem(), ref });
+    }
+    se.fichas += qtd; se.valor = Math.round((se.valor + valor) * 100) / 100; se.fichaEm = now;
+    se.lanc.push({ id: uid('lf'), ts: now, qtd, valor, cobranca: cmd ? 'comanda' : metodo, comandaNum: cmd?.numero || null, por: quem(), ref });
+    A.log(d, `${qtd} ficha(s) vendida(s) na ${m.nome} por ${quem()} · ${cmd ? 'comanda ' + cmd.numero : METODOS[metodo] || metodo} · ${brl(valor)}`);
+    if (iniciar === true || (iniciar === 'auto' && !se.usadas)) A.novaPartida(d, mesaId);
   },
+  // libera a próxima partida: usa 1 ficha do saldo da mesa
+  novaPartida(d, mesaId) {
+    const m = d.mesas.find((x) => x.id === mesaId); const se = m?.sessao;
+    if (!se || se.jogo !== 'ficha' || saldoFichas(se) <= 0) return false;
+    const now = Date.now();
+    se.usadas += 1; se.partidaEm = now; se.fichaEm = now; se.partidas.push(now);
+    return true;
+  },
+  // compat: "+N fichas" já liberando a partida quando a mesa está sem saldo
+  maisFicha(d, mesaId, qtd = 1, metodo = 'dinheiro') {
+    const se = d.mesas.find((x) => x.id === mesaId)?.sessao; if (!ehFicha(se)) return;
+    const semSaldo = saldoFichas(se) === 0;
+    A.venderFichas(d, mesaId, qtd, { metodo, iniciar: false });
+    if (semSaldo) A.novaPartida(d, mesaId);
+  },
+  // vincula (ou desvincula) a mesa de sinuca a uma comanda: as próximas fichas entram nela
+  vincularComanda(d, mesaId, comandaId) {
+    const m = d.mesas.find((x) => x.id === mesaId); if (!ehFicha(m?.sessao)) return;
+    m.sessao.comandaId = comandaId || null;
+    const c = d.comandas.find((x) => x.id === comandaId);
+    A.log(d, `${m.nome} ${c ? 'vinculada à comanda ' + c.numero : 'sem comanda (fichas pagas na hora)'} por ${quem()}`);
+  },
+  // estorno de fichas NÃO jogadas (saldo). Exige gerente/dono. Desfaz os lançamentos mais recentes primeiro.
+  estornarFichas(d, mesaId, qtd, autorizou, motivo = '') {
+    const m = d.mesas.find((x) => x.id === mesaId); const se = m?.sessao;
+    if (!ehFicha(se) || !autorizou) return 0;
+    let resta = Math.min(qtd, saldoFichas(se)); if (resta <= 0) return 0;
+    const preco = precoFicha(d); const now = Date.now(); const total = resta;
+    for (const l of [...se.lanc].reverse()) {
+      if (resta <= 0) break;
+      const ja = se.lanc.filter((x) => x.estornoDe === l.id).reduce((a, x) => a - x.qtd, 0);
+      const q = Math.min(resta, l.qtd - ja); if (l.qtd <= 0 || q <= 0) continue;
+      const pu = l.valor / l.qtd; const v = Math.round(pu * q * 100) / 100;
+      // a linha da ficha pode ter mudado de comanda (juntar/transferir): procura em todas as abertas
+      let cmd = null; let it = null;
+      if (l.cobranca === 'comanda') for (const c of d.comandas) { if (c.status !== 'aberta') continue; const x = c.itens.find((i) => i.fichaMesaId === m.id && Math.abs(i.preco - pu) < 0.001 && i.qtd > 0); if (x) { cmd = c; it = x; if (c.numero === l.comandaNum) break; } }
+      if (it) { it.qtd -= q; if (it.qtd <= 0) cmd.itens = cmd.itens.filter((i) => i !== it); }
+      else d.pagamentos.push({ id: uid('pg'), ts: now, metodo: l.cobranca === 'comanda' ? 'dinheiro' : l.cobranca, valor: -v, origem: `Estorno de ${q} ficha(s) · ${m.nome}`, tipo: 'jogo', mesaJogoId: m.id, fichas: -q, por: quem(), estorno: true });
+      se.lanc.push({ id: uid('lf'), ts: now, qtd: -q, valor: -v, cobranca: l.cobranca, comandaNum: l.comandaNum, por: quem(), autorizou, motivo, estornoDe: l.id });
+      se.fichas -= q; se.estornadas += q; se.valor = Math.round((se.valor - v) * 100) / 100; resta -= q;
+    }
+    const txt = `Estorno de ${total} ficha(s) na ${m.nome} (${brl(total * preco)}) · pedido por ${quem()}, autorizado por ${autorizou}${motivo ? ' · ' + motivo : ''}`;
+    A.log(d, txt); A.alertaEstoque(d, 'fichas', txt, -total * preco, autorizou);
+    return total;
+  },
+  // encerra o jogo da mesa. Na sinuca, o saldo não estornado conta como jogado e a sessão vai para o histórico.
   encerrarJogo(d, mesaId) {
     const m = d.mesas.find((x) => x.id === mesaId); if (!m) return;
+    const se = m.sessao;
+    if (ehFicha(se)) {
+      const now = Date.now(); const sobra = saldoFichas(se);
+      for (let k = 0; k < sobra; k++) se.partidas.push(now);
+      se.usadas += sobra;
+      d.historicoSinuca = d.historicoSinuca || [];
+      const cmd = d.comandas.find((c) => c.id === se.comandaId);
+      d.historicoSinuca.unshift({ ...se, id: uid('hs'), mesaId: m.id, mesaNome: m.nome, fim: now, encerradoPor: quem(), sobraCobrada: sobra, comandaNum: cmd?.numero || null });
+      d.historicoSinuca = d.historicoSinuca.slice(0, 2000);
+      A.log(d, `${m.nome} encerrada por ${quem()}: ${se.fichas} ficha(s), ${se.partidas.length} partida(s), ${brl(se.valor)}${sobra ? ` (${sobra} não jogada(s) ficaram cobradas)` : ''}`);
+    }
     m.sessao = null;
     A.chamarProximo(d, mesaId);
+  },
+  // conferência do cofre/contador de fichas da mesa de sinuca
+  conferirCofre(d, mesaId, contado, obs = '') {
+    const m = d.mesas.find((x) => x.id === mesaId); if (!m || !(contado >= 0)) return null;
+    const ant = ultimaConferencia(d, mesaId);
+    const esperado = usadasDesde(d, mesaId, ant ? ant.ts : 0);
+    const dif = contado - esperado; const preco = precoFicha(d);
+    const c = { id: uid('cf'), ts: Date.now(), mesaId, mesaNome: m.nome, desde: ant ? ant.ts : null, esperado, contado, dif, valor: dif * preco, por: quem(), obs };
+    d.conferenciasFichas = d.conferenciasFichas || [];
+    d.conferenciasFichas.unshift(c);
+    A.log(d, `Cofre da ${m.nome} conferido por ${quem()}: ${contado} ficha(s), esperado ${esperado}${dif ? ', diferença ' + (dif > 0 ? '+' : '') + dif : ', conferiu'}`);
+    if (dif !== 0) A.alertaEstoque(d, 'fichas', dif > 0
+      ? `Cofre da ${m.nome}: ${dif} ficha(s) a mais do que as partidas registradas (${brl(dif * preco)} jogados sem lançamento) · conferido por ${quem()}`
+      : `Cofre da ${m.nome}: faltam ${-dif} ficha(s) em relação às partidas registradas · conferido por ${quem()}`, dif > 0 ? -dif * preco : 0);
+    return c.id;
   },
   // ----- fila de jogos -----
   entrarFila(d, { nome, tel = '', tipo, jogadores }) {

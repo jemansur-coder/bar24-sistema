@@ -5,6 +5,55 @@ import { FotoProduto } from '../fotos.jsx';
 import { Link, useRota } from '../router.jsx';
 import { useOperador } from '../sessao.jsx';
 import { Cardapio, ItensComanda, NovaComanda, Pagamento } from './Caixa.jsx';
+import { mmss } from '../store.jsx';
+import { precoFicha, saldoFichas } from '../sinuca.js';
+import { VenderFichas } from './SinucaControle.jsx';
+import { Modal } from '../ui.jsx';
+
+// Sinuca na maquininha do garçom: ver cada mesa, liberar a próxima partida e vender fichas
+// (na comanda do cliente ou cobrando na própria maquininha).
+function SinucaGarcom() {
+  const { s, act } = useStore();
+  const now = useNow(1000);
+  const [vender, setVender] = useState(null);
+  const [msg, setMsg] = useState('');
+  const mesas = s.mesas.filter((m) => m.tipo === 'sinuca');
+  const aviso = (t) => { setMsg(t); setTimeout(() => setMsg(''), 3500); };
+  return (
+    <section className="col">
+      <span className="small muted">Sinuca por ficha: {brl(precoFicha(s))} cada partida. Cada mesa tem o próprio saldo de fichas.</span>
+      {msg && <div className="ok">{msg}</div>}
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
+        {mesas.map((m) => {
+          const se = m.sessao; const saldo = saldoFichas(se);
+          const cmd = se?.comandaId && s.comandas.find((c) => c.id === se.comandaId && c.status === 'aberta');
+          return (
+            <div key={m.id} className="card tight col" style={{ gap: 6, borderColor: !se ? undefined : saldo ? 'var(--ok)' : 'var(--warn)' }}>
+              <div className="row between"><b className="display" style={{ fontSize: 20 }}>{m.nome}</b><span className={'pill ' + (!se ? 'off' : saldo ? 'ok' : 'warn')}>{!se ? 'LIVRE' : saldo ? 'EM JOGO' : 'ÚLTIMA FICHA'}</span></div>
+              {se ? (
+                <>
+                  <span>Ficha <b className="num">{se.usadas}/{se.fichas}</b> · saldo <b className="num">{saldo}</b> · {brl(se.valor)}</span>
+                  <span className="small muted">Partida há {mmss(Math.max(0, now - (se.partidaEm || se.inicio)))}{cmd ? ' · comanda ' + cmd.numero : ' · pago na hora'}</span>
+                  <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    <button type="button" className="btn sm primary" disabled={!saldo} onClick={() => { act((d) => A.novaPartida(d, m.id)); aviso(m.nome + ': partida ' + (se.usadas + 1) + ' liberada'); }}>Próxima partida</button>
+                    <button type="button" className="btn sm" onClick={() => setVender(m.id)}>Vender fichas</button>
+                  </div>
+                </>
+              ) : (
+                <button type="button" className="btn sm primary" onClick={() => setVender(m.id)}>Abrir mesa com fichas</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {vender && (() => { const m = s.mesas.find((x) => x.id === vender); return (
+        <Modal titulo={(m.sessao ? 'Vender fichas · ' : 'Abrir ') + m.nome} onClose={() => setVender(null)}>
+          <VenderFichas mesa={m} compacto onFeito={(t) => { setVender(null); aviso('Lançado: ' + t); }} />
+        </Modal>
+      ); })()}
+    </section>
+  );
+}
 
 // Cardápio digital para o garçom conferir: foto, descrição, preço e o que está esgotado.
 function CardapioDigital() {
@@ -95,7 +144,7 @@ export default function Garcom() {
     return (
       <>
         <div className="topbar">
-          <div className="col" style={{ gap: 2 }}><h1>Garçom</h1><span className="muted">Tablet ou maquininha no salão</span></div>
+          <div className="col" style={{ gap: 2 }}><h1>Garçom</h1><span className="muted">Maquininha (POS) ou tablet no salão</span></div>
           {usuario?.papel === 'Garçom' ? <Link className="btn" to="salao">Mapa do salão</Link> : (
             <label className="field" style={{ minWidth: 200 }}>Ver comandas de
               <select className="input" value={eu} onChange={(e) => setEu(e.target.value)}>{garcons.map((g) => <option key={g.id}>{g.nome}</option>)}</select>
@@ -104,9 +153,10 @@ export default function Garcom() {
         </div>
         <div className="row" style={{ gap: 8 }} role="tablist">
           <button type="button" role="tab" aria-selected={aba === 'comandas'} className={'chip' + (aba === 'comandas' ? ' on' : '')} onClick={() => setAba('comandas')}>Comandas</button>
-          <button type="button" role="tab" aria-selected={aba === 'cardapio'} className={'chip' + (aba === 'cardapio' ? ' on' : '')} onClick={() => setAba('cardapio')}>Cardápio digital</button>
+          <button type="button" role="tab" aria-selected={aba === 'sinuca'} className={'chip' + (aba === 'sinuca' ? ' on' : '')} onClick={() => setAba('sinuca')}>Sinuca</button>
+          <button type="button" role="tab" aria-selected={aba === 'cardapio'} className={'chip' + (aba === 'cardapio' ? ' on' : '')} onClick={() => setAba('cardapio')}>Cardápio</button>
         </div>
-        {aba === 'cardapio' ? <CardapioDigital /> : (<>
+        {aba === 'sinuca' ? <SinucaGarcom /> : aba === 'cardapio' ? <CardapioDigital /> : (<>
         <ProntosParaBuscar garcom={eu} onAbrir={setSel} />
         <button type="button" className="btn primary big" onClick={() => setNova(true)}>+ Abrir comanda / mesa</button>
         {[['Minhas comandas', minhas], ['Outras comandas', outras]].map(([tit, lista]) => (
@@ -172,6 +222,11 @@ export default function Garcom() {
             <button type="button" className="btn" disabled={pend.length > 0 || !t.falta} onClick={() => setPagando(true)}>Cobrar aqui</button>
           </div>
         </section>
+      </div>
+      {/* maquininha (tela pequena): barra fixa embaixo com o total e o envio, sem precisar rolar até o pedido */}
+      <div className="pos-barra">
+        <div className="col" style={{ gap: 0 }}><span className="small muted">{pend.length ? pend.reduce((a, i) => a + i.qtd, 0) + ' item(ns) a enviar' : 'Total'}</span><b className="display num" style={{ fontSize: 20 }}>{brl(t.total)}</b></div>
+        <button type="button" className="btn primary" disabled={!pend.length} onClick={() => { const n = act((d) => A.enviar(d, c.id)); setMsg(n + ' item(ns) enviados.'); setTimeout(() => setMsg(''), 3500); }}>Enviar pedido</button>
       </div>
       {pagando && <Pagamento comanda={c} onClose={(f) => { setPagando(false); if (f) setSel(null); }} />}
     </>

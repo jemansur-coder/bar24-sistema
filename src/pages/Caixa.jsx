@@ -1,3 +1,4 @@
+import { BotaoPOS } from '../integracoes/BotaoPOS.jsx';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, ir, useRota } from '../router.jsx';
 import { useOperador } from '../sessao.jsx';
@@ -135,8 +136,8 @@ export function Pagamento({ comanda, onClose }) {
   const [clienteId, setCliente] = useState(comanda.clienteId || '');
   const [nota, setNota] = useState(true);
   const [cpf, setCpf] = useState('');
-  const [pixOk, setPixOk] = useState(false);
-  const [cartaoOk, setCartaoOk] = useState(false);
+  const [pixOk, setPixOk] = useState(null); // resultado da cobrança (integracoes/pagamento.js)
+  const [cartaoOk, setCartaoOk] = useState(null);
   const v = Math.min(t.falta, parseFloat(String(valor).replace(',', '.')) || 0);
   const rec = parseFloat(String(recebido).replace(',', '.')) || 0;
   const cl = s.clientes.find((c) => c.id === clienteId);
@@ -145,13 +146,13 @@ export function Pagamento({ comanda, onClose }) {
 
   const pagar = () => {
     act((d) => {
-      A.pagar(d, comanda.id, metodo, v, metodo === 'fiado' ? clienteId : null);
+      A.pagar(d, comanda.id, metodo, v, metodo === 'fiado' ? clienteId : null, (metodo === 'cartao' ? cartaoOk : metodo === 'pix' ? pixOk : null)?.nsu || null);
       const c = d.comandas.find((x) => x.id === comanda.id);
       if (totalComanda(c, d.config).falta <= 0.001) A.fecharComanda(d, comanda.id, { nota, cpf });
     });
     const restante = Math.round((t.falta - v) * 100) / 100;
     if (restante <= 0.001) onClose(true);
-    else { setValor(restante.toFixed(2).replace('.', ',')); setRecebido(''); setPixOk(false); setCartaoOk(false); }
+    else { setValor(restante.toFixed(2).replace('.', ',')); setRecebido(''); setPixOk(null); setCartaoOk(null); }
   };
 
   return (
@@ -176,7 +177,7 @@ export function Pagamento({ comanda, onClose }) {
           <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20M6 15h4" /></svg>
           <div className="col" style={{ gap: 6 }}>
             <span className="muted small">{cartaoOk ? 'Cartão aprovado.' : 'Aproxime, insira ou passe o cartão na maquininha (débito ou crédito).'}</span>
-            {cartaoOk ? <span className="ok"><b>Aprovado · {brl(v)}</b></span> : <button type="button" className="btn sm" onClick={() => setCartaoOk(true)}>Simular cartão aprovado</button>}
+            <BotaoPOS valor={v} metodo="cartao" descricao={'Comanda ' + comanda.numero} referencia={comanda.id} aprovado={cartaoOk} onAprovado={setCartaoOk} />
           </div>
         </div>
       )}
@@ -187,7 +188,7 @@ export function Pagamento({ comanda, onClose }) {
           </svg>
           <div className="col" style={{ gap: 6 }}>
             <span className="muted small">Pix dinâmico de {brl(v)}. Na versão final a confirmação chega sozinha pelo banco.</span>
-            {pixOk ? <span className="ok"><b>Pagamento confirmado</b></span> : <button type="button" className="btn sm" onClick={() => setPixOk(true)}>Simular confirmação</button>}
+            <BotaoPOS valor={v} metodo="pix" descricao={'Comanda ' + comanda.numero} referencia={comanda.id} aprovado={pixOk} onAprovado={setPixOk} />
           </div>
         </div>
       )}
@@ -270,7 +271,8 @@ export function ItensComanda({ c, editavel = true }) {
             </div>
             <div className="col" style={{ alignItems: 'flex-end', gap: 4 }}>
               <span className="num" style={{ fontWeight: 600 }}>{brl(i.preco * i.qtd)}</span>
-              {editavel && i.status !== 'pendente' && (
+              {i.fichaMesaId && <span className="small muted">estorno só pela mesa</span>}
+              {editavel && i.status !== 'pendente' && !i.fichaMesaId && (
                 <button type="button" className="btn sm ghost" onClick={() => setCancelando(i)}>Cancelar</button>
               )}
             </div>

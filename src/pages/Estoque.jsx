@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
-import { A, brl, dias, ehGestor, sugestaoCompra, useStore } from '../store.jsx';
+import { A, brl, dias, sugestaoCompra, useStore } from '../store.jsx';
 import { GRUPOS_ESTOQUE, MOTIVOS_SAIDA } from '../seed.js';
 import { Kpi, Modal } from '../ui.jsx';
 import { FotoProduto } from '../fotos.jsx';
-import { useOperador } from '../sessao.jsx';
+import { usePinGestor } from '../sessao.jsx';
 
 // Estoque: tabela por item (estilo painel de distribuição), entradas e saídas com motivo,
 // histórico de movimentações, contagem cega do turno e divergências (controle anti-furto).
@@ -19,21 +19,6 @@ export const TIPOS_MOV = { venda: ['Venda', ''], entrada: ['Entrada', 'ok'], con
 function fotoDe(s, i) {
   const p = s.produtos.find((x) => (x.ficha || []).some(([id]) => id === i.id) && (x.ficha || []).length === 1) || s.produtos.find((x) => (x.ficha || []).some(([id]) => id === i.id));
   return p || { id: i.id, nome: i.nome, cat: i.grupo === 'Destilados' ? 'Doses' : i.grupo === 'Cozinha' ? 'Lanches' : 'Cervejas' };
-}
-
-function usePinGestor() {
-  const { s } = useStore();
-  const { usuario } = useOperador();
-  const [pin, setPin] = useState('');
-  const gestor = ehGestor(usuario);
-  const aut = gestor ? usuario : s.usuarios.find((u) => u.pin === pin && ehGestor(u) && u.ativo);
-  const campo = gestor ? <span className="small muted">Você ({usuario.nome}) autoriza. Fica registrado no seu nome.</span> : (
-    <label className="field">PIN do gerente ou do dono para autorizar
-      <input className="input" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} />
-      {pin.length === 4 && !aut && <span className="bad">PIN não autorizado</span>}
-    </label>
-  );
-  return { aut, campo };
 }
 
 function Movimentar({ item, tipo, onClose }) {
