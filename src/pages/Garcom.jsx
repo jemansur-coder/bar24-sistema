@@ -124,7 +124,7 @@ export default function Garcom() {
                     <b className="num">{brl(t.total)}</b>
                     {prontoCoz && <span className="small ok"><b>Prato pronto na cozinha</b></span>}
                     {prontoBar && <span className="small ok"><b>Bebida pronta no bar</b></span>}
-                    {x.contaPedida && <span className="small" style={{ color: 'var(--warn)' }}><b>Pediu a conta</b></span>}
+                    {x.contaPedida && <span className="small" style={{ color: 'var(--warn)' }}><b>{x.contaEmitidaEm && !x.contaEntregueEm ? 'Conta pronta no caixa' : x.contaEntregueEm ? 'Conta entregue' : 'Pediu a conta'}</b></span>}
                   </button>
                 );
               })}

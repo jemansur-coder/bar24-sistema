@@ -33,6 +33,8 @@ function load() {
         delete s.caixa.sangrias; delete s.caixa.suprimentos;
       }
       if (!s.turnos) s.turnos = [];
+      // sinuca passou a ser controlada por ficha (partida), sem cronômetro
+      s.mesas.forEach((m) => { if (m.sessao?.jogo === 'ficha' && m.sessao.fichas == null) { m.sessao.fichas = m.sessao.jogadores || 1; m.sessao.fim = null; m.sessao.fichaEm = m.sessao.inicio; } });
       // inclui Gilmar e Ingrid só se ainda não existir alguém com o mesmo nome (evita duplicar quem já foi cadastrado à mão)
       const mesmo = (a, b) => a.nome.trim().toLowerCase() === b.nome.trim().toLowerCase();
       NOVOS_USUARIOS.forEach((u) => {
@@ -121,12 +123,16 @@ export function totalComanda(c, cfg) {
 }
 export function estadoMesa(m, now, avisoMin = 5) {
   if (!m.sessao) return 'livre';
+  if (m.sessao.jogo === 'ficha') return 'jogo'; // sinuca por ficha: conta partidas, não tem tempo para acabar
   const r = m.sessao.fim - now;
   if (r <= 0) return 'esgotado';
   if (r <= avisoMin * 60000) return 'acabando';
   return 'jogo';
 }
 export const tipoJogo = (id) => TIPOS_JOGO.find((t) => t.id === id);
+export const porFicha = (se) => se?.jogo === 'ficha';
+// o que mostrar no relógio da mesa: fichas na sinuca, tempo restante nas cartas
+export const relogioMesa = (m, now = Date.now()) => (!m.sessao ? '—' : porFicha(m.sessao) ? 'Ficha ' + m.sessao.fichas : mmss(Math.max(0, m.sessao.fim - now)));
 
 export function sugestaoCompra(s) {
   return s.insumos.map((i) => {
@@ -193,6 +199,25 @@ export function prontosParaLevar(s, garcom = null) {
   return out.sort((a, b) => a.ts - b.ts);
 }
 
+// novidades da cozinha para o caixa acompanhar: pedido novo e início do preparo (somem depois de alguns segundos)
+export function eventosCozinha(s, now = Date.now(), janela = 25000) {
+  const out = [];
+  for (const c of s.comandas) {
+    if (c.status !== 'aberta') continue;
+    const g = {};
+    for (const i of c.itens) if (i.destino === 'cozinha' && i.envio && (i.status === 'enviado' || i.status === 'preparo')) (g[i.envio] = g[i.envio] || []).push(i);
+    for (const [envio, itens] of Object.entries(g)) {
+      const prep = itens.find((i) => i.status === 'preparo');
+      if (prep && prep.preparoEm && now - prep.preparoEm < janela) out.push({ chave: envio + 'p', tipo: 'preparo', c, itens, ts: prep.preparoEm });
+      else if (!prep && now - itens[0].enviadoEm < janela) out.push({ chave: envio + 'n', tipo: 'novo', c, itens, ts: itens[0].enviadoEm, tablet: itens.some((i) => i.via === 'tablet') });
+    }
+  }
+  return out.sort((a, b) => a.ts - b.ts);
+}
+
+// contas emitidas pelo caixa que o garçom ainda precisa levar à mesa
+export const contasParaLevar = (s, garcom = null) => s.comandas.filter((c) => c.status === 'aberta' && c.contaEmitidaEm && !c.contaEntregueEm && (!garcom || c.garcom === garcom));
+
 export function hoje(now = Date.now()) { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime(); }
 
 // ---------- ações ----------
@@ -205,12 +230,12 @@ export const A = {
     d.comandas.push(c);
     return c.id;
   },
-  addItem(d, comandaId, produtoId, qtd = 1, obs = '') {
+  addItem(d, comandaId, produtoId, qtd = 1, obs = '', via = '') {
     const c = d.comandas.find((x) => x.id === comandaId); const p = d.produtos.find((x) => x.id === produtoId);
     if (!c || !p || p.esgotado) return;
     const ex = c.itens.find((i) => i.produtoId === produtoId && i.status === 'pendente' && i.obs === obs);
     if (ex) ex.qtd += qtd;
-    else c.itens.push({ id: uid('it'), produtoId, nome: p.nome, preco: p.preco, qtd, obs, destino: p.destino, status: 'pendente', envio: null, enviadoEm: null, por: quem() });
+    else c.itens.push({ id: uid('it'), produtoId, nome: p.nome, preco: p.preco, qtd, obs, destino: p.destino, status: 'pendente', envio: null, enviadoEm: null, por: quem(), via });
   },
   addAvulso(d, comandaId, nome, preco, destino = 'balcao') {
     const c = d.comandas.find((x) => x.id === comandaId); if (!c) return;
@@ -248,7 +273,7 @@ export const A = {
     return pend.length;
   },
   iniciarPreparo(d, comandaId, envio) {
-    d.comandas.find((x) => x.id === comandaId)?.itens.forEach((i) => { if (i.envio === envio && i.destino === 'cozinha' && i.status === 'enviado') i.status = 'preparo'; });
+    d.comandas.find((x) => x.id === comandaId)?.itens.forEach((i) => { if (i.envio === envio && i.destino === 'cozinha' && i.status === 'enviado') { i.status = 'preparo'; i.preparoEm = Date.now(); } });
   },
   pronto(d, comandaId, envio) {
     d.comandas.find((x) => x.id === comandaId)?.itens.forEach((i) => { if (i.envio === envio && i.destino === 'cozinha' && (i.status === 'enviado' || i.status === 'preparo')) { i.status = 'pronto'; i.prontoEm = Date.now(); } });
@@ -285,11 +310,15 @@ export const A = {
   iniciarJogo(d, mesaId, { jogo, jogadores, minutos, metodo, comandaId }) {
     const m = d.mesas.find((x) => x.id === mesaId); const t = tipoJogo(jogo); if (!m || !t) return;
     const valor = t.preco * jogadores; const now = Date.now();
-    m.sessao = { jogo, jogadores, minutos, inicio: now, fim: now + minutos * 60000, valor, comandaId: comandaId || null, visto: false };
+    // sinuca por ficha: "jogadores" é a quantidade de fichas compradas; cada ficha é uma partida
+    m.sessao = jogo === 'ficha'
+      ? { jogo, fichas: jogadores, jogadores: 2, minutos: 0, inicio: now, fim: null, fichaEm: now, valor, comandaId: comandaId || null, visto: false }
+      : { jogo, jogadores, minutos, inicio: now, fim: now + minutos * 60000, valor, comandaId: comandaId || null, visto: false };
     const daFila = d.fila.find((x) => x.status === 'chamado' && x.mesaJogoId === mesaId);
     if (daFila) m.sessao.jogadorFila = daFila.nome;
     d.fila = d.fila.filter((x) => !(x.status === 'chamado' && x.mesaJogoId === mesaId));
-    if (comandaId) A.addAvulso(d, comandaId, `${t.nome} ×${jogadores} · ${m.nome} · ${minutos} min`, valor, 'jogo');
+    const desc = jogo === 'ficha' ? `${jogadores} ficha(s) · ${m.nome}` : `${t.nome} ×${jogadores} · ${m.nome} · ${minutos} min`;
+    if (comandaId) A.addAvulso(d, comandaId, desc, valor, 'jogo');
     else d.pagamentos.push({ id: uid('pg'), ts: now, metodo, valor, origem: `Jogo ${t.nome} · ${m.nome}`, tipo: 'jogo' });
   },
   maisTempo(d, mesaId, minutos, metodo) {
@@ -301,6 +330,15 @@ export const A = {
     m.sessao.valor += valor;
     if (m.sessao.comandaId && d.comandas.find((c) => c.id === m.sessao.comandaId && c.status === 'aberta')) A.addAvulso(d, m.sessao.comandaId, `+${minutos} min · ${m.nome}`, valor, 'jogo');
     else d.pagamentos.push({ id: uid('pg'), ts: now, metodo: metodo || 'dinheiro', valor, origem: `+${minutos} min · ${m.nome}`, tipo: 'jogo' });
+  },
+  // sinuca: mais fichas (cada ficha = uma partida)
+  maisFicha(d, mesaId, qtd = 1, metodo = 'dinheiro') {
+    const m = d.mesas.find((x) => x.id === mesaId); if (!m?.sessao || m.sessao.jogo !== 'ficha') return;
+    const t = tipoJogo('ficha'); const valor = t.preco * qtd;
+    m.sessao.fichas += qtd; m.sessao.valor += valor; m.sessao.fichaEm = Date.now();
+    if (m.sessao.comandaId && d.comandas.find((c) => c.id === m.sessao.comandaId && c.status === 'aberta')) A.addAvulso(d, m.sessao.comandaId, `+${qtd} ficha(s) · ${m.nome}`, valor, 'jogo');
+    else d.pagamentos.push({ id: uid('pg'), ts: Date.now(), metodo, valor, origem: `+${qtd} ficha(s) · ${m.nome}`, tipo: 'jogo' });
+    A.log(d, `+${qtd} ficha(s) na ${m.nome} (${quem()}), total ${m.sessao.fichas}`);
   },
   encerrarJogo(d, mesaId) {
     const m = d.mesas.find((x) => x.id === mesaId); if (!m) return;
@@ -327,6 +365,14 @@ export const A = {
   sairFila(d, filaId) { d.fila = d.fila.filter((x) => x.id !== filaId); },
   // ----- chamados do cliente (QR Code da mesa) -----
   chamarGarcom(d, { mesaId, motivo, itens = [], obs = '' }) {
+    const aberta = d.comandas.find((x) => x.status === 'aberta' && x.mesaId === mesaId);
+    if (motivo === 'pedido' && itens.length && aberta) {
+      // tablet fixo da mesa com comanda aberta pelo garçom: o pedido vai direto (pratos para a cozinha, bebidas para o bar)
+      for (const it of itens) A.addItem(d, aberta.id, it.produtoId, it.qtd, it.obs || '', 'tablet');
+      A.enviar(d, aberta.id);
+      d.chamados.push({ id: uid('ch'), mesaId, motivo, itens, obs, ts: Date.now(), atendido: true, atendidoEm: Date.now(), direto: true });
+      return 'direto';
+    }
     if (d.chamados.some((c) => c.mesaId === mesaId && c.motivo === motivo && !c.atendido && !itens.length)) return;
     d.chamados.push({ id: uid('ch'), mesaId, motivo, itens, obs, ts: Date.now(), atendido: false });
   },
@@ -340,6 +386,16 @@ export const A = {
       A.enviar(d, c.id);
     }
     if (ch.motivo === 'conta') { const c = d.comandas.find((x) => x.status === 'aberta' && x.mesaId === ch.mesaId); if (c) c.contaPedida = true; }
+  },
+  // caixa emite (imprime) a pré-conta e avisa o garçom da comanda para levar à mesa
+  emitirConta(d, comandaId) {
+    const c = d.comandas.find((x) => x.id === comandaId); if (!c) return;
+    c.contaPedida = true; c.contaEmitidaEm = Date.now(); c.contaEntregueEm = null; c.contaEmitidaPor = quem();
+    d.chamados.forEach((ch) => { if (!ch.atendido && ch.mesaId === c.mesaId && ch.motivo === 'conta') { ch.atendido = true; ch.atendidoEm = Date.now(); } });
+    A.log(d, `Conta da comanda ${c.numero} emitida por ${quem()}`);
+  },
+  contaEntregue(d, comandaId) {
+    const c = d.comandas.find((x) => x.id === comandaId); if (c) c.contaEntregueEm = Date.now();
   },
   // ----- produto esgotado -----
   esgotar(d, produtoId, esgotado) {

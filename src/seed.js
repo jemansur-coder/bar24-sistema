@@ -18,7 +18,7 @@ export const DESCRICOES = {
 };
 
 export const TIPOS_JOGO = [
-  { id: 'ficha', nome: 'Ficha sinuca', preco: 2, mesa: 'sinuca' },
+  { id: 'ficha', nome: 'Ficha sinuca', preco: 2, mesa: 'sinuca', porFicha: true },
   { id: 'ronda', nome: 'Ronda', preco: 50, mesa: 'cartas' },
   { id: 'pife', nome: 'Pife', preco: 25, mesa: 'cartas' },
 ];
@@ -165,8 +165,8 @@ export function seed() {
   ];
 
   const mesas = [
-    { id: 'sinuca-1', nome: 'Sinuca 1', tipo: 'sinuca', sessao: { jogo: 'ficha', jogadores: 2, minutos: 30, inicio: now - 11 * MIN, fim: now + 19 * MIN, valor: 4, comandaId: 'cm-940', visto: false } },
-    { id: 'sinuca-2', nome: 'Sinuca 2', tipo: 'sinuca', sessao: { jogo: 'ficha', jogadores: 2, minutos: 30, inicio: now - 30 * MIN - 20000, fim: now - 20000, valor: 4, comandaId: null, visto: false } },
+    { id: 'sinuca-1', nome: 'Sinuca 1', tipo: 'sinuca', sessao: { jogo: 'ficha', fichas: 3, jogadores: 2, minutos: 0, inicio: now - 34 * MIN, fichaEm: now - 6 * MIN, fim: null, valor: 6, comandaId: 'cm-940', visto: false } },
+    { id: 'sinuca-2', nome: 'Sinuca 2', tipo: 'sinuca', sessao: { jogo: 'ficha', fichas: 1, jogadores: 2, minutos: 0, inicio: now - 9 * MIN, fichaEm: now - 9 * MIN, fim: null, valor: 2, comandaId: null, visto: false } },
     { id: 'sinuca-3', nome: 'Sinuca 3', tipo: 'sinuca', sessao: null },
     { id: 'cartas-1', nome: 'Cartas 1', tipo: 'cartas', sessao: { jogo: 'pife', jogadores: 4, minutos: 60, inicio: now - 57 * MIN, fim: now + 3 * MIN, valor: 100, comandaId: null, visto: false } },
     { id: 'cartas-2', nome: 'Cartas 2', tipo: 'cartas', sessao: { jogo: 'ronda', jogadores: 3, minutos: 60, inicio: now - 19 * MIN, fim: now + 41 * MIN, valor: 150, comandaId: null, visto: false } },
