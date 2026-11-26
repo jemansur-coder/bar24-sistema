@@ -9,6 +9,23 @@ import { mmss } from '../store.jsx';
 import { precoFicha, saldoFichas } from '../sinuca.js';
 import { VenderFichas } from './SinucaControle.jsx';
 import { Modal } from '../ui.jsx';
+import { configurarPOS, imprimir, naPOS } from '../integracoes/pagamento.js';
+
+// Texto da comanda para a impressora térmica da maquininha (32 colunas).
+function textoComanda(c, s) {
+  const t = totalComanda(c, s.config);
+  const mesa = c.mesaId ? s.mesasSalao.find((m) => m.id === c.mesaId)?.nome : '';
+  const linha = (a, b) => { a = String(a); b = String(b); return a.slice(0, 31 - b.length).padEnd(32 - b.length) + b; };
+  const v = (n) => n.toFixed(2).replace('.', ',');
+  const l = ['BAR 24 HORAS', 'Comanda ' + c.numero + (mesa ? ' - ' + mesa : ''), 'Garcom: ' + c.garcom, new Date().toLocaleString('pt-BR'), '-'.repeat(32)];
+  c.itens.forEach((i) => { l.push(linha(i.qtd + 'x ' + i.nome, v(i.preco * i.qtd))); if (i.obs) l.push('   obs: ' + i.obs); });
+  l.push('-'.repeat(32));
+  if (t.serv) { l.push(linha('Subtotal', v(t.sub))); l.push(linha('Servico', v(t.serv))); }
+  l.push(linha('TOTAL R$', v(t.total)));
+  if (t.pago) { l.push(linha('Pago', v(t.pago))); l.push(linha('Falta', v(t.falta))); }
+  l.push('', 'Nao e documento fiscal', '', '');
+  return l.join('\n');
+}
 
 // Sinuca na maquininha do garçom: ver cada mesa, liberar a próxima partida e vender fichas
 // (na comanda do cliente ou cobrando na própria maquininha).
@@ -145,6 +162,7 @@ export default function Garcom() {
       <>
         <div className="topbar">
           <div className="col" style={{ gap: 2 }}><h1>Garçom</h1><span className="muted">Maquininha (POS) ou tablet no salão</span></div>
+          {naPOS() && <button type="button" className="btn" onClick={configurarPOS} aria-label="Configurar maquininha">⚙ Maquininha</button>}
           {usuario?.papel === 'Garçom' ? <Link className="btn" to="salao">Mapa do salão</Link> : (
             <label className="field" style={{ minWidth: 200 }}>Ver comandas de
               <select className="input" value={eu} onChange={(e) => setEu(e.target.value)}>{garcons.map((g) => <option key={g.id}>{g.nome}</option>)}</select>
@@ -221,6 +239,7 @@ export default function Garcom() {
             <button type="button" className="btn" onClick={() => act((d) => { const x = d.comandas.find((k) => k.id === c.id); x.contaPedida = !x.contaPedida; })}>{c.contaPedida ? 'Cancelar conta' : 'Pedir a conta'}</button>
             <button type="button" className="btn" disabled={pend.length > 0 || !t.falta} onClick={() => setPagando(true)}>Cobrar aqui</button>
           </div>
+          {naPOS() && <button type="button" className="btn" disabled={!c.itens.length} onClick={() => imprimir(textoComanda(c, s))}>Imprimir comanda</button>}
         </section>
       </div>
       {/* maquininha (tela pequena): barra fixa embaixo com o total e o envio, sem precisar rolar até o pedido */}

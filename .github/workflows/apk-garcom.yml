@@ -1,0 +1,26 @@
+# Gera o APK do app do garçom (maquininha Cielo) a cada mudança no sistema ou na pasta android/.
+# O APK fica em "Actions" > execução > "Artifacts" > bar24-garcom-apk.
+name: APK do garçom (Cielo)
+
+on:
+  workflow_dispatch:
+  push:
+    paths: ['android/**', 'src/**', 'package.json', '.github/workflows/apk-garcom.yml']
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - run: npm ci
+      - name: Gerar APK (debug, para teste)
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bar24-garcom-apk
+          path: android/app/build/outputs/apk/debug/*.apk

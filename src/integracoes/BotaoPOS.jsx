@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { brl } from '../store.jsx';
-import { ADQUIRENTE, cobrar } from './pagamento.js';
+import { cobrar, cobrancaDeTeste, naPOS } from './pagamento.js';
 
 // Botão que manda a cobrança para a maquininha (ou gera o Pix) e avisa quando aprovar.
 // Toda a comunicação passa por integracoes/pagamento.js (hoje simulado).
@@ -18,7 +18,7 @@ export function BotaoPOS({ valor, metodo = 'cartao', descricao = '', referencia 
         {estado === 'aguardando' ? (metodo === 'pix' ? 'Aguardando o Pix…' : 'Aguardando a maquininha…') : (metodo === 'pix' ? 'Gerar Pix de ' : 'Cobrar na maquininha ') + brl(valor)}
       </button>
       {estado && estado !== 'aguardando' && <span className="small bad">{estado}</span>}
-      {ADQUIRENTE === 'simulado' && <span className="small muted">Simulação: aprova sozinho em 1 segundo.</span>}
+      {cobrancaDeTeste() && <span className="small muted">{naPOS() ? 'Maquininha em modo teste: aprova sozinho, nada é cobrado.' : 'Simulação: aprova sozinho em 1 segundo.'}</span>}
     </div>
   );
 }

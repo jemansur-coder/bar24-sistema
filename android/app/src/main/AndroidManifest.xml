@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App do garçom (Bar 24 Horas) para a maquininha Cielo Smart.
+     Pagamento e impressão pela integração "deep link" da Cielo (lio://payment e lio://print). -->
+<!-- Pacote, versão e minSdk/targetSdk ficam em app/build.gradle -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="true"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+
+        <!-- Exigência da Cielo Smart: integração por URI (deep link) -->
+        <meta-data android:name="cs_integration_type" android:value="uri" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- retorno da Cielo depois do pagamento / impressão: bar24garcom://response?response=<base64> -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="bar24garcom" android:host="response" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
