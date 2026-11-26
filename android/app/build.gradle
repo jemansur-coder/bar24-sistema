@@ -1,0 +1,55 @@
+plugins {
+    id 'com.android.application'
+}
+
+// App do garçom (Bar 24 Horas) para a maquininha Cielo Smart.
+// Requisitos da Cielo Smart: minSdk 24 e targetSdk 29; integração por deep link (meta-data cs_integration_type=uri).
+android {
+    namespace 'br.com.bar24horas.garcom'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'br.com.bar24horas.garcom'
+        minSdk 24
+        targetSdk 29
+        // Para cada nova versão enviada à Cielo Store: aumente versionCode e versionName.
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    // A tela do garçom é o próprio sistema web (pasta raiz do repositório). O build copia o "dist"
+    // gerado por "npm run build" para dentro do APK, em assets/www.
+    sourceSets {
+        main.assets.srcDirs += layout.buildDirectory.dir('generated/www-assets')
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Assinatura: configure em Build > Generate Signed APK, ou num signingConfig próprio.
+        }
+    }
+
+    lint { abortOnError false }
+}
+
+def raiz = rootProject.projectDir.parentFile
+
+tasks.register('buildWeb', Exec) {
+    description = 'Gera o sistema web (npm ci + npm run build) na raiz do repositório'
+    workingDir raiz
+    commandLine 'sh', '-c', '[ -d node_modules ] || npm ci; npm run build'
+}
+
+tasks.register('copiarWeb', Copy) {
+    dependsOn 'buildWeb'
+    from new File(raiz, 'dist')
+    into layout.buildDirectory.dir('generated/www-assets/www')
+}
+
+tasks.named('preBuild') { dependsOn 'copiarWeb' }

@@ -19,10 +19,18 @@
 //   Resultado = { aprovado: boolean, metodo, valor, nsu?, autorizacao?, bandeira?, mensagem? }
 // =====================================================================================
 
-export const ADQUIRENTE = 'simulado'; // trocar para 'stone' | 'pagbank' | 'cielo' | 'getnet' | 'mercadopago' ...
-
-// a página está rodando dentro do app casca da POS (bridge Android)?
+// a página está rodando dentro do app da maquininha (pasta android/ do repositório)?
 export const naPOS = () => typeof window !== 'undefined' && !!window.Android && typeof window.Android.cobrar === 'function';
+
+// Informações do app da maquininha: { adquirente: 'cielo', modoTeste: true|false, versao }
+export function infoPOS() {
+  try { return naPOS() && window.Android.info ? JSON.parse(window.Android.info()) : null; } catch (e) { return null; }
+}
+
+// Adquirente escolhida: Cielo (Cielo Smart L300). Fora da maquininha (navegador, tablet) a cobrança é simulada.
+export const ADQUIRENTE = naPOS() ? (infoPOS()?.adquirente || 'cielo') : 'simulado';
+// a maquininha está em "modo teste" (Configurar maquininha → sem credenciais ou caixa marcada)?
+export const cobrancaDeTeste = () => !naPOS() || !!infoPOS()?.modoTeste;
 
 let seq = 0;
 function simular({ valor, metodo }) {
@@ -47,6 +55,17 @@ function viaBridge(pedido) {
 export async function cobrar({ valor, metodo = 'cartao', descricao = '', referencia = '' }) {
   if (!(valor > 0)) return { aprovado: false, metodo, valor, mensagem: 'Valor inválido' };
   const pedido = { valor: Math.round(valor * 100) / 100, metodo, descricao, referencia };
-  if (ADQUIRENTE !== 'simulado' && naPOS()) return viaBridge(pedido);
+  if (naPOS()) return viaBridge(pedido);
   return simular(pedido);
+}
+
+// Imprime texto na impressora da maquininha (Cielo: lio://print). Fora dela, abre a impressão do navegador.
+export function imprimir(texto) {
+  if (naPOS() && window.Android.imprimir) { window.Android.imprimir(texto); return true; }
+  return false;
+}
+
+// Abre a tela de configurações do app da maquininha (Client ID, Access Token, modo teste).
+export function configurarPOS() {
+  if (naPOS() && window.Android.configurar) window.Android.configurar();
 }
