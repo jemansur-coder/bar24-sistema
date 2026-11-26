@@ -1,5 +1,5 @@
 import { Link } from '../router.jsx';
-import { A, avisosAbertos, brl, desde, ticketsBar, dias, estadoMesa, mmss, nomeCliente, tipoJogo, totalComanda, useNow, useStore } from '../store.jsx';
+import { A, avisosAbertos, brl, desde, ticketsBar, dias, estadoMesa, mmss, relogioMesa, nomeCliente, tipoJogo, totalComanda, useNow, useStore } from '../store.jsx';
 import { resumoDia } from '../stats.js';
 import { nomeMotivo, ticketsCozinha } from './Cozinha.jsx';
 import { Kpi } from '../ui.jsx';
@@ -126,8 +126,8 @@ export default function Dashboard() {
             const e = estadoMesa(m, now, s.config.avisoMin);
             return (
               <div key={m.id} className="list-item">
-                <span>{m.nome}{m.sessao ? ' · ' + tipoJogo(m.sessao.jogo).nome + ' (' + m.sessao.jogadores + ')' : ''}</span>
-                <b className={'num ' + (e === 'esgotado' ? 'bad' : e === 'acabando' ? 'accent' : e === 'livre' ? 'muted' : '')}>{e === 'livre' ? 'Livre' : e === 'esgotado' ? 'Esgotado' : mmss(m.sessao.fim - now)}</b>
+                <span>{m.nome}{m.sessao ? ' · ' + tipoJogo(m.sessao.jogo).nome + (m.sessao.jogo === 'ficha' ? '' : ' (' + m.sessao.jogadores + ')') : ''}</span>
+                <b className={'num ' + (e === 'esgotado' ? 'bad' : e === 'acabando' ? 'accent' : e === 'livre' ? 'muted' : '')}>{e === 'livre' ? 'Livre' : e === 'esgotado' ? 'Esgotado' : relogioMesa(m, now)}</b>
               </div>
             );
           })}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { A, brl, estadoMesa, mmss, totalComanda, useNow, useStore } from '../store.jsx';
+import { A, brl, estadoMesa, relogioMesa, totalComanda, useNow, useStore } from '../store.jsx';
 import { CATEGORIAS } from '../seed.js';
 import { Logo, Modal, TemaBtn, bip } from '../ui.jsx';
 import { QR } from '../qr.jsx';
@@ -36,8 +36,8 @@ function Cardapio({ mesa }) {
   const total = itens.reduce((a, [pid, q]) => a + q * (s.produtos.find((p) => p.id === pid)?.preco || 0), 0);
   const mudar = (pid, d) => setCarrinho({ ...carrinho, [pid]: Math.max(0, (carrinho[pid] || 0) + d) });
   const chamar = (motivo, lista = []) => {
-    act((d) => A.chamarGarcom(d, { mesaId: mesa.id, motivo, itens: lista }));
-    setEnviado(motivo === 'pedido' ? 'Pedido enviado ao garçom. Ele confirma e já manda para a cozinha.' : motivo === 'conta' ? 'O garçom vai trazer a conta.' : 'O garçom foi chamado.');
+    const r = act((d) => A.chamarGarcom(d, { mesaId: mesa.id, motivo, itens: lista }));
+    setEnviado(r === 'direto' ? 'Pedido enviado! Os pratos já estão na tela da cozinha e as bebidas no bar.' : motivo === 'pedido' ? 'Pedido enviado ao garçom. Ele confirma e já manda para a cozinha.' : motivo === 'conta' ? 'O garçom vai trazer a conta.' : 'O garçom foi chamado.');
     if (motivo === 'pedido') setCarrinho({});
     setTimeout(() => setEnviado(''), 6000);
   };
@@ -48,6 +48,7 @@ function Cardapio({ mesa }) {
         <button type="button" className="btn big" onClick={() => chamar('conta')}>Pedir a conta</button>
       </div>
       {(enviado || pend.length > 0) && <div className="card tight" style={{ borderColor: 'var(--ok)', background: 'var(--ok-soft)' }}><b className="ok">{enviado || 'Garçom chamado, já está vindo.'}</b></div>}
+      <SeusPedidos mesa={mesa} />
       <div className="row" style={{ gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
         {CATEGORIAS.map((c) => <button key={c} type="button" className={'chip' + (cat === c ? ' on' : '')} style={{ flex: 'none' }} onClick={() => setCat(c)}>{c}</button>)}
       </div>
@@ -69,10 +70,29 @@ function Cardapio({ mesa }) {
         <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, padding: '12px max(16px, env(safe-area-inset-left, 0px)) calc(12px + env(safe-area-inset-bottom, 0px))', background: 'var(--bg-2)', borderTop: '1px solid var(--line)', zIndex: 20 }}>
           <div style={{ maxWidth: 480, margin: '0 auto' }} className="col">
             <span className="small muted">{itens.map(([pid, q]) => q + '× ' + s.produtos.find((p) => p.id === pid)?.nome).join(', ')}</span>
-            <button type="button" className="btn primary big" onClick={() => chamar('pedido', itens.map(([produtoId, qtd]) => ({ produtoId, qtd })))}>Enviar pedido ao garçom · {brl(total)}</button>
+            <button type="button" className="btn primary big" onClick={() => chamar('pedido', itens.map(([produtoId, qtd]) => ({ produtoId, qtd })))}>{s.comandas.some((c) => c.status === 'aberta' && c.mesaId === mesa.id) ? 'Fazer pedido' : 'Enviar pedido ao garçom'} · {brl(total)}</button>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// acompanhamento do pedido pelo cliente: na fila, em preparo, pronto, entregue
+const STATUS_CLIENTE = { enviado: ['Recebido', 'muted'], preparo: ['Em preparo', 'accent'], pronto: ['Pronto, já está vindo', 'ok'], entregue: ['Entregue', 'muted'] };
+function SeusPedidos({ mesa }) {
+  const { s } = useStore();
+  const c = s.comandas.find((x) => x.status === 'aberta' && x.mesaId === mesa.id);
+  const agora = useNow(5000);
+  const itens = (c?.itens || []).filter((i) => i.destino !== 'jogo' && i.status !== 'pendente' && (i.status !== 'entregue' || agora - (i.servidoEm || 0) < 10 * 60000) && agora - (i.enviadoEm || 0) < 90 * 60000);
+  if (!itens.length) return null;
+  return (
+    <div className="card tight col" style={{ gap: 6 }} aria-label="Seus pedidos">
+      <b className="small muted">SEUS PEDIDOS</b>
+      {itens.map((i) => {
+        const [txt, cls] = i.destino === 'bar' && i.status === 'enviado' ? ['Separando no bar', 'accent'] : i.destino === 'cozinha' && i.status === 'enviado' ? ['Na fila da cozinha', 'muted'] : STATUS_CLIENTE[i.status] || ['', 'muted'];
+        return <div key={i.id} className="row between"><span>{i.qtd}× {i.nome}</span><b className={'small ' + cls}>{txt}</b></div>;
+      })}
     </div>
   );
 }
@@ -102,13 +122,14 @@ function PagarPix({ comanda, valor, onClose }) {
 }
 
 function Conta({ mesa }) {
-  const { s } = useStore();
+  const { s, act } = useStore();
   const c = s.comandas.find((x) => x.status === 'aberta' && x.mesaId === mesa.id);
   const [pessoas, setPessoas] = useState(c?.pessoas || 2);
   const [outro, setOutro] = useState('');
   const [pagar, setPagar] = useState(null);
   if (!c) return <div className="empty">Nenhuma conta aberta nesta mesa. Faça seu pedido pelo cardápio ou chame o garçom.</div>;
   const t = totalComanda(c, s.config);
+  const pediu = c.contaPedida || s.chamados.some((x) => x.mesaId === mesa.id && x.motivo === 'conta' && !x.atendido);
   const parte = Math.min(t.falta, Math.ceil((t.total / pessoas) * 100) / 100);
   const vOutro = Math.min(t.falta, parseFloat(outro.replace(',', '.')) || 0);
   return (
@@ -125,6 +146,9 @@ function Conta({ mesa }) {
           <div className="row between"><b>Falta pagar</b><b className="display num accent" style={{ fontSize: 24 }}>{brl(t.falta)}</b></div>
         </div>
       </div>
+      {t.falta > 0 && (c.contaEmitidaEm
+        ? <div className="card tight" style={{ borderColor: 'var(--ok)', background: 'var(--ok-soft)' }}><b className="ok">{c.contaEntregueEm ? 'Sua conta foi entregue. Pague com o garçom na maquininha ou no Pix aqui.' : 'Conta emitida pelo caixa. O garçom ' + c.garcom + ' já está trazendo.'}</b></div>
+        : <button type="button" className="btn primary big" disabled={pediu} onClick={() => act((d) => A.chamarGarcom(d, { mesaId: mesa.id, motivo: 'conta' }))}>{pediu ? 'Conta pedida, aguarde o garçom' : 'Pedir a conta'}</button>)}
       {t.falta > 0 && (
         <div className="card col">
           <h2>Dividir a conta</h2>
@@ -206,7 +230,7 @@ export function FilaJogos() {
         <h2 style={{ marginBottom: 8 }}>Mesas agora</h2>
         {s.mesas.map((m) => {
           const e = estadoMesa(m, now, s.config.avisoMin);
-          return <div key={m.id} className="list-item"><span>{m.nome}</span><b className={'num ' + (e === 'livre' ? 'ok' : e === 'esgotado' ? 'bad' : '')}>{e === 'livre' ? 'Livre' : e === 'esgotado' ? 'Acabando' : 'faltam ' + mmss(m.sessao.fim - now)}</b></div>;
+          return <div key={m.id} className="list-item"><span>{m.nome}</span><b className={'num ' + (e === 'livre' ? 'ok' : e === 'esgotado' ? 'bad' : '')}>{e === 'livre' ? 'Livre' : e === 'esgotado' ? 'Acabando' : (m.sessao.jogo === 'ficha' ? 'em jogo · ' + relogioMesa(m, now) : 'faltam ' + relogioMesa(m, now))}</b></div>;
         })}
       </div>
       <div className="card col" style={{ gap: 0 }}>
@@ -220,6 +244,21 @@ export function FilaJogos() {
   );
 }
 
+// depois que a conta é paga, o tablet agradece por alguns minutos
+function Despedida({ mesa }) {
+  const { s } = useStore();
+  const agora = useNow(10000);
+  if (s.comandas.some((c) => c.status === 'aberta' && c.mesaId === mesa.id)) return null;
+  const ultima = s.comandas.filter((c) => c.status === 'fechada' && c.mesaId === mesa.id && agora - (c.fechadaEm || 0) < 15 * 60000).sort((a, b) => b.fechadaEm - a.fechadaEm)[0];
+  if (!ultima) return null;
+  return (
+    <div className="card col" style={{ marginBottom: 16, alignItems: 'center', textAlign: 'center', gap: 6, borderColor: 'var(--ok)', background: 'var(--ok-soft)' }}>
+      <b className="display ok" style={{ fontSize: 26 }}>Conta paga. Obrigado!</b>
+      <span>Foi um prazer receber vocês. Volte sempre, estamos abertos 24 horas.</span>
+    </div>
+  );
+}
+
 export function ClienteMesa({ mesaId }) {
   const { s } = useStore();
   const [aba, setAba] = useState('cardapio');
@@ -228,6 +267,7 @@ export function ClienteMesa({ mesaId }) {
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: '0 max(16px, env(safe-area-inset-left, 0px))', minHeight: '100vh' }}>
       <Topo titulo={mesa.nome} sub={s.config.nomeBar} />
+      <Despedida mesa={mesa} />
       <div className="grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 6, marginBottom: 16 }}>
         {[['cardapio', 'Cardápio'], ['conta', 'Minha conta'], ['jogos', 'Jogos']].map(([k, l]) => <button key={k} type="button" className={'chip' + (aba === k ? ' on' : '')} onClick={() => setAba(k)}>{l}</button>)}
       </div>
